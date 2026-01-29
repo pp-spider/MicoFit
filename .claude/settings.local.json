@@ -4,7 +4,14 @@
       "Bash(dir:*)",
       "Bash(powershell:*)",
       "Bash(flutter test:*)",
-      "Bash(flutter run:*)"
+      "Bash(flutter run:*)",
+      "Bash(flutter pub get:*)",
+      "Bash(set PUB_HOSTED_URL=https://pub.flutter-io.cn)",
+      "Bash(set FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn:*)",
+      "Bash(curl:*)",
+      "Bash(sqlite3:*)",
+      "Bash(pip install:*)",
+      "Bash(flutter analyze:*)"
     ]
   }
 }

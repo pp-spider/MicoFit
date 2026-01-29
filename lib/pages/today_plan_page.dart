@@ -8,12 +8,14 @@ class TodayPlanPage extends StatefulWidget {
   final WorkoutPlan workoutPlan;
   final VoidCallback onStartWorkout;
   final Function(String) onNavigate;
+  final VoidCallback? onRefresh;  // 新增：刷新回调
 
   const TodayPlanPage({
     super.key,
     required this.workoutPlan,
     required this.onStartWorkout,
     required this.onNavigate,
+    this.onRefresh,  // 新增
   });
 
   @override
@@ -24,6 +26,8 @@ class _TodayPlanPageState extends State<TodayPlanPage> {
   int refreshCount = 3;
 
   void handleRefresh() {
+    // 调用外部提供的刷新回调
+    widget.onRefresh?.call();
     if (refreshCount > 0) {
       setState(() {
         refreshCount--;

@@ -4,10 +4,12 @@ import '../widgets/bottom_nav.dart';
 
 /// 打卡记录页面 - 月度视图
 class WeeklyViewPage extends StatefulWidget {
+  final MonthlyStats monthlyData;  // 改为必需参数
   final Function(String) onNavigate;
 
   const WeeklyViewPage({
     super.key,
+    required this.monthlyData,  // 必需
     required this.onNavigate,
   });
 
@@ -17,19 +19,20 @@ class WeeklyViewPage extends StatefulWidget {
 
 class _WeeklyViewPageState extends State<WeeklyViewPage>
     with SingleTickerProviderStateMixin {
-  late MonthlyStats _monthlyData;
   int? selectedDayIndex;
   late AnimationController _progressController;
 
   @override
   void initState() {
     super.initState();
-    _monthlyData = MonthlyStats.createSample();
     _progressController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..forward();
   }
+
+  // Getter 方便访问数据
+  MonthlyStats get _monthlyData => widget.monthlyData;
 
   @override
   void dispose() {

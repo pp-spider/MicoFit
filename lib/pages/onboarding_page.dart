@@ -3,15 +3,17 @@ import '../models/user_profile.dart';
 
 /// 用户画像构建页面 - 3步流程
 class OnboardingPage extends StatefulWidget {
-  final Function(UserProfile) onComplete;
+  final Function(String userId, UserProfile) onComplete;
   final VoidCallback? onCancel;
   final UserProfile? initialProfile; // 新增：初始用户数据，用于编辑模式
+  final String userId; // 用户ID（必填）
 
   const OnboardingPage({
     super.key,
     required this.onComplete,
     this.onCancel,
     this.initialProfile,
+    required this.userId,
   });
 
   @override
@@ -138,6 +140,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
   void _handleComplete() {
     if (_nickname.isNotEmpty && _height > 0 && _weight > 0) {
       final profile = UserProfile(
+        userId: widget.userId,
         nickname: _nickname,
         height: _height,
         weight: _weight,
@@ -151,7 +154,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
         weeklyDays: _weeklyDays,
         preferredTime: _preferredTime,
       );
-      widget.onComplete(profile);
+      widget.onComplete(widget.userId, profile);
     }
   }
 

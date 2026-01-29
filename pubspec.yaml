@@ -38,6 +38,15 @@ dependencies:
   # Local storage
   shared_preferences: ^2.2.2
 
+  # HTTP 请求
+  http: ^1.2.0
+
+  # 状态管理
+  provider: ^6.1.1
+
+  # 网络状态检测
+  connectivity_plus: ^5.0.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

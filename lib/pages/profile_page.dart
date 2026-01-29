@@ -1,18 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_profile.dart';
 import '../widgets/bottom_nav.dart';
+import '../providers/auth_provider.dart';
 
 /// 个人资料页面
 class ProfilePage extends StatefulWidget {
   final UserProfile? userProfile;
   final Function(String) onNavigate;
   final VoidCallback onReset;
+  final Function(int weeklyDays, int timeBudget)? onSaveGoals;  // 新增
 
   const ProfilePage({
     super.key,
     required this.userProfile,
     required this.onNavigate,
     required this.onReset,
+    this.onSaveGoals,  // 新增
   });
 
   @override
@@ -324,6 +329,13 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                     const SizedBox(height: 12),
                     _buildActionButton(
+                      icon: Icons.logout,
+                      label: '退出登录',
+                      onTap: _showLogoutConfirmDialog,
+                      isSecondary: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _buildActionButton(
                       icon: Icons.refresh,
                       label: '重新录入',
                       onTap: _showResetConfirmDialog,
@@ -465,13 +477,8 @@ class _ProfilePageState extends State<ProfilePage> {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: () {
-                // TODO: 保存目标设置
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('目标已保存'),
-                    backgroundColor: Color(0xFF2DD4BF),
-                  ),
-                );
+                // 调用外部保存回调
+                widget.onSaveGoals?.call(_weeklyDays, _timeBudget);
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2DD4BF),
@@ -659,6 +666,69 @@ class _ProfilePageState extends State<ProfilePage> {
               onPressed: () {
                 Navigator.of(context).pop();
                 widget.onReset();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFEF4444),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // 显示登出确认对话框
+  void _showLogoutConfirmDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            '退出登录',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF115E59),
+            ),
+          ),
+          content: const Text(
+            '确定要退出登录吗？',
+            style: TextStyle(
+              fontSize: 14,
+              color: Color(0xFF666666),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.grey[600],
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+              ),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                final authProvider = context.read<AuthProvider>();
+                final prefs = await SharedPreferences.getInstance();
+                await authProvider.logout(prefs);
+                widget.onNavigate('login');
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFEF4444),

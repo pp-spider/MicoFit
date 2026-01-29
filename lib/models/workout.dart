@@ -61,14 +61,14 @@ class WorkoutPlan {
     return WorkoutPlan(
       id: json['id'] as String,
       title: json['title'] as String,
-      subtitle: json['subtitle'] as String,
-      totalDuration: json['totalDuration'] as int,
+      subtitle: json['subtitle'] as String? ?? '',
+      totalDuration: json['total_duration'] as int? ?? json['totalDuration'] as int? ?? 12,
       scene: json['scene'] as String,
       rpe: json['rpe'] as int,
       modules: (json['modules'] as List)
           .map((e) => WorkoutModule.fromJson(e as Map<String, dynamic>))
           .toList(),
-      aiNote: json['aiNote'] as String?,
+      aiNote: json['ai_note'] as String? ?? json['aiNote'] as String?,
     );
   }
 

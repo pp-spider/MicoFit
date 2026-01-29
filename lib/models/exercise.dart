@@ -28,11 +28,13 @@ class Exercise {
       name: json['name'] as String,
       duration: json['duration'] as int,
       description: json['description'] as String,
-      steps: List<String>.from(json['steps'] as List),
-      tips: json['tips'] as String,
-      breathing: json['breathing'] as String,
-      image: json['image'] as String,
-      targetMuscles: List<String>.from(json['targetMuscles'] as List),
+      steps: List<String>.from(json['steps'] as List? ?? []),
+      tips: json['tips'] as String? ?? '',
+      breathing: json['breathing'] as String? ?? '',
+      image: json['image'] as String? ?? '',
+      targetMuscles: List<String>.from(
+        json['target_muscles'] as List? ?? json['targetMuscles'] as List? ?? [],
+      ),
     );
   }
 
