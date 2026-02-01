@@ -18,7 +18,7 @@ class BottomNav extends StatelessWidget {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -26,7 +26,7 @@ class BottomNav extends StatelessWidget {
       ),
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
@@ -39,6 +39,11 @@ class BottomNav extends StatelessWidget {
                 icon: Icons.calendar_view_week,
                 label: '打卡',
                 page: 'weekly',
+              ),
+              _buildNavItem(
+                icon: Icons.smart_toy,
+                label: 'AI',
+                page: 'ai',
               ),
               _buildNavItem(
                 icon: Icons.person,
@@ -63,10 +68,10 @@ class BottomNav extends StatelessWidget {
       onTap: () => onNavigate(page),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: isActive
-              ? const Color(0xFF2DD4BF).withOpacity(0.1)
+              ? const Color(0xFF2DD4BF).withValues(alpha: 0.1)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
         ),

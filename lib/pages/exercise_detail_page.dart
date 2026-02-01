@@ -7,12 +7,16 @@ class ExerciseDetailPage extends StatefulWidget {
   final Exercise exercise;
   final VoidCallback onComplete;
   final VoidCallback onBack;
+  final int currentIndex;  // 当前动作索引
+  final int totalCount;   // 总动作数
 
   const ExerciseDetailPage({
     super.key,
     required this.exercise,
     required this.onComplete,
     required this.onBack,
+    required this.currentIndex,
+    required this.totalCount,
   });
 
   @override
@@ -161,7 +165,7 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    const Color(0xFFF5F5F0).withOpacity(0),
+                    const Color(0xFFF5F5F0).withValues(alpha: 0),
                     const Color(0xFFF5F5F0),
                   ],
                 ),
@@ -234,36 +238,73 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Row(
+      child: Column(
         children: [
-          GestureDetector(
-            onTap: widget.onBack,
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
-                    blurRadius: 8,
+          Row(
+            children: [
+              GestureDetector(
+                onTap: widget.onBack,
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 8,
+                      ),
+                    ],
                   ),
-                ],
+                  child: const Icon(
+                    Icons.chevron_left,
+                    color: Color(0xFF115E59),
+                  ),
+                ),
               ),
-              child: const Icon(
-                Icons.chevron_left,
-                color: Color(0xFF115E59),
+              const SizedBox(width: 16),
+              const Text(
+                '动作详情',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF115E59),
+                ),
               ),
-            ),
+            ],
           ),
-          const SizedBox(width: 16),
-          const Text(
-            '动作详情',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w500,
-              color: Color(0xFF115E59),
+          const SizedBox(height: 12),
+          // 进度指示器
+          Row(
+            children: [
+              Text(
+                '${widget.currentIndex + 1} / ${widget.totalCount}',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[600],
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${widget.exercise.duration}秒',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // 进度条
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: (widget.currentIndex + 1) / widget.totalCount,
+              backgroundColor: Colors.grey[200],
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF2DD4BF)),
+              minHeight: 6,
             ),
           ),
         ],
@@ -281,7 +322,7 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
+              color: Colors.black.withValues(alpha: 0.08),
               blurRadius: 12,
             ),
           ],
@@ -299,7 +340,7 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
                     Icon(
                       _getExerciseIcon(),
                       size: 80,
-                      color: const Color(0xFF2DD4BF).withOpacity(0.5),
+                      color: const Color(0xFF2DD4BF).withValues(alpha: 0.5),
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -339,7 +380,7 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -354,7 +395,7 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
                 width: 24,
                 height: 24,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF2DD4BF).withOpacity(0.2),
+                  color: const Color(0xFF2DD4BF).withValues(alpha: 0.2),
                   shape: BoxShape.circle,
                 ),
                 child: const Center(
@@ -387,7 +428,7 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
                     width: 20,
                     height: 20,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2DD4BF).withOpacity(0.2),
+                      color: const Color(0xFF2DD4BF).withValues(alpha: 0.2),
                       shape: BoxShape.circle,
                     ),
                     child: Center(
@@ -516,7 +557,7 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
     return GestureDetector(
       onTap: () {},
       child: Container(
-        color: const Color(0xFF1F2937).withOpacity(0.95),
+        color: const Color(0xFF1F2937).withValues(alpha: 0.95),
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -617,7 +658,7 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
                         width: 64,
                         height: 64,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.1),
+                          color: Colors.white.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -635,7 +676,7 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
                         width: 48,
                         height: 48,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.1),
+                          color: Colors.white.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(

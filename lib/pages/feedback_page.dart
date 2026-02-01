@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/feedback.dart';
+import '../services/record_local_service.dart';
 
 /// 训练反馈页面
 class FeedbackPage extends StatefulWidget {
@@ -54,6 +55,24 @@ class _FeedbackPageState extends State<FeedbackPage>
 
   void _handleSubmit() {
     if (!_allAnswered) return;
+
+    // 保存反馈到本地
+    final feedback = WorkoutFeedback(
+      completion: _completion!,
+      feeling: _feeling!,
+      tomorrow: _tomorrow!,
+    );
+
+    try {
+      final recordService = RecordLocalService();
+      recordService.saveFeedback(
+        date: DateTime.now(),
+        feedback: feedback,
+        duration: widget.workoutDuration,
+      );
+    } catch (e) {
+      debugPrint('保存反馈失败: $e');
+    }
 
     setState(() {
       _showAIResponse = true;
@@ -293,7 +312,7 @@ class _FeedbackPageState extends State<FeedbackPage>
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -395,7 +414,7 @@ class _FeedbackPageState extends State<FeedbackPage>
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -521,7 +540,7 @@ class _FeedbackPageState extends State<FeedbackPage>
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -589,7 +608,7 @@ class _FeedbackPageState extends State<FeedbackPage>
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            const Color(0xFFF5F5F0).withOpacity(0),
+            const Color(0xFFF5F5F0).withValues(alpha: 0),
             const Color(0xFFF5F5F0),
           ],
         ),

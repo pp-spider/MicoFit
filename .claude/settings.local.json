@@ -11,7 +11,14 @@
       "Bash(curl:*)",
       "Bash(sqlite3:*)",
       "Bash(pip install:*)",
-      "Bash(flutter analyze:*)"
+      "Bash(flutter analyze:*)",
+      "mcp__web-reader__webReader",
+      "Bash(del /F d:FlutterProjectsmicofitlibservicesai_fallback_service.dart)",
+      "mcp__web-search-prime__webSearchPrime",
+      "Bash(flutter pub deps:*)",
+      "Bash(flutter pub cache list:*)",
+      "Bash(flutter build:*)",
+      "Bash(flutter pub upgrade:*)"
     ]
   }
 }

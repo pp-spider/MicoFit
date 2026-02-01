@@ -3,24 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/user_profile.dart';
-import '../services/user_api_service.dart';
+import '../services/workout_local_service.dart';
 
 /// 用户画像状态管理
 class UserProfileProvider extends ChangeNotifier {
-  final UserApiService _apiService;
   final SharedPreferences _prefs;
 
   UserProfile? _profile;
   bool _isLoading = false;
   String? _errorMessage;
 
-  static const String _keyProfile = 'micofit_user_profile';
-
-  UserProfileProvider({
-    required UserApiService apiService,
-    required SharedPreferences prefs,
-  })  : _apiService = apiService,
-        _prefs = prefs;
+  UserProfileProvider({required SharedPreferences prefs}) : _prefs = prefs;
 
   // Getters
   UserProfile? get profile => _profile;
@@ -28,22 +21,17 @@ class UserProfileProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get hasProfile => _profile != null;
 
-  /// 初始化：根据 hasProfile 状态决定加载策略
-  Future<void> init({bool hasProfile = false}) async {
-    _loadFromLocal();
-
-    if (AppConfig.enableApi && hasProfile && _profile != null) {
-      // 后端确认有画像，从服务器同步
-      await _syncFromServer();
-    } else if (AppConfig.enableApi && !hasProfile) {
-      // 后端确认无画像，清除本地缓存
-      await clearProfile();
-    }
+  /// 初始化
+  Future<void> init() async {
+    // 使用 Future.microtask 避免在 build 阶段调用 notifyListeners
+    await Future.microtask(() {
+      _loadFromLocal();
+    });
   }
 
   /// 从本地加载
   void _loadFromLocal() {
-    final profileJson = _prefs.getString(_keyProfile);
+    final profileJson = _prefs.getString(AppConfig.keyUserProfile);
     if (profileJson != null) {
       try {
         final profileMap = jsonDecode(profileJson) as Map<String, dynamic>;
@@ -55,42 +43,20 @@ class UserProfileProvider extends ChangeNotifier {
     }
   }
 
-  /// 从服务器同步
-  Future<void> _syncFromServer() async {
-    if (_profile?.userId == null) return;
-
-    try {
-      final serverProfile = await _apiService.getUserProfile(_profile!.userId);
-      await _saveToLocal(serverProfile);
-      _profile = serverProfile;
-      notifyListeners();
-    } catch (e) {
-      debugPrint('同步用户数据失败: $e');
-    }
-  }
-
-  /// 保存用户画像（本地 + API）
+  /// 保存用户画像（本地）
   Future<void> saveProfile(UserProfile profile) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      if (AppConfig.enableApi) {
-        _profile = await _apiService.createUserProfile(profile);
-      } else {
-        _profile = profile;
-      }
-
+      _profile = profile;
       await _saveToLocal(_profile!);
+      // 清除训练计划缓存，以便下次加载时基于新画像生成
+      await WorkoutLocalService().clearCache();
     } catch (e) {
       _errorMessage = e.toString();
-      if (AppConfig.useFallbackWhenApiFails) {
-        _profile = profile;
-        await _saveToLocal(profile);
-      } else {
-        rethrow;
-      }
+      rethrow;
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -99,7 +65,7 @@ class UserProfileProvider extends ChangeNotifier {
 
   /// 保存到本地
   Future<void> _saveToLocal(UserProfile profile) async {
-    await _prefs.setString(_keyProfile, jsonEncode(profile.toJson()));
+    await _prefs.setString(AppConfig.keyUserProfile, jsonEncode(profile.toJson()));
   }
 
   /// 更新目标设置
@@ -132,7 +98,7 @@ class UserProfileProvider extends ChangeNotifier {
 
   /// 清除用户画像
   Future<void> clearProfile() async {
-    await _prefs.remove(_keyProfile);
+    await _prefs.remove(AppConfig.keyUserProfile);
     _profile = null;
     notifyListeners();
   }

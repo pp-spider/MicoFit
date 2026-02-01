@@ -1,19 +1,16 @@
 import 'package:flutter/material.dart';
-import '../config/app_config.dart';
 import '../models/workout.dart';
-import '../services/workout_api_service.dart';
-import '../utils/sample_data.dart';
+import '../services/workout_local_service.dart';
 
 /// 训练计划状态管理
 class WorkoutProvider extends ChangeNotifier {
-  final WorkoutApiService _apiService;
+  final WorkoutLocalService _localService = WorkoutLocalService();
 
   WorkoutPlan? _todayWorkout;
   bool _isLoading = false;
   String? _errorMessage;
 
-  WorkoutProvider({required WorkoutApiService apiService})
-      : _apiService = apiService;
+  WorkoutProvider();
 
   // Getters
   WorkoutPlan? get todayWorkout => _todayWorkout;
@@ -22,26 +19,16 @@ class WorkoutProvider extends ChangeNotifier {
   bool get hasWorkout => _todayWorkout != null;
 
   /// 加载今日训练计划
-  Future<void> loadTodayWorkout(String userId) async {
+  Future<void> loadTodayWorkout() async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      if (AppConfig.enableApi) {
-        _todayWorkout = await _apiService.getTodayWorkout(userId);
-      } else {
-        // 使用模拟数据
-        await Future.delayed(const Duration(milliseconds: 300));
-        _todayWorkout = getSampleWorkoutPlan();
-      }
+      _todayWorkout = await _localService.generateTodayWorkout();
     } catch (e) {
       _errorMessage = e.toString();
-      if (AppConfig.useFallbackWhenApiFails) {
-        _todayWorkout = getSampleWorkoutPlan();
-      } else {
-        rethrow;
-      }
+      rethrow;
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -49,28 +36,37 @@ class WorkoutProvider extends ChangeNotifier {
   }
 
   /// 刷新训练计划
-  Future<void> refreshWorkout(String userId) async {
+  Future<void> refreshWorkout() async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      if (AppConfig.enableApi) {
-        _todayWorkout = await _apiService.refreshWorkout(userId);
-      } else {
-        // 使用模拟数据（重置一下表示刷新）
-        await Future.delayed(const Duration(milliseconds: 300));
-        _todayWorkout = getSampleWorkoutPlan();
-      }
+      _todayWorkout = await _localService.refreshWorkout();
     } catch (e) {
       _errorMessage = e.toString();
-      if (AppConfig.useFallbackWhenApiFails) {
-        _todayWorkout = getSampleWorkoutPlan();
-      } else {
-        rethrow;
-      }
+      rethrow;
     } finally {
       _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// 直接设置今日训练计划（用于 AI 生成的计划）
+  void setWorkout(WorkoutPlan plan) {
+    _todayWorkout = plan;
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  /// 从 JSON 加载训练计划
+  void loadWorkoutFromJson(Map<String, dynamic> json) {
+    try {
+      _todayWorkout = WorkoutPlan.fromJson(json);
+      _errorMessage = null;
+      notifyListeners();
+    } catch (e) {
+      _errorMessage = '计划加载失败: $e';
       notifyListeners();
     }
   }

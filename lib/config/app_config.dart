@@ -1,17 +1,25 @@
 /// 应用配置
 class AppConfig {
-  /// API 基础地址
-  static const String apiBaseUrl = 'http://127.0.0.1:9999';
+  // 应用配置
+  static const String appVersion = '1.0.0';
 
-  /// API 版本
-  static const String apiVersion = '/api/v1';
+  // 本地数据存储Key
+  static const String keyUserProfile = 'micofit_user_profile';
+  static const String keyWorkoutRecords = 'micofit_workout_records';
+  static const String keyLocalUserId = 'micofit_local_user_id';
+  static const String keyWorkoutProgress = 'micofit_workout_progress';
 
-  /// 是否启用 API（功能开关，便于测试回退）
-  static const bool enableApi = true;
+  // AI配置 Key
+  static const String keyAIBaseUrl = 'ai_base_url';
+  static const String keyAIApiKey = 'ai_api_key';
+  static const String keyAIModel = 'ai_model';
 
-  /// API 失败时是否使用 fallback
-  static const bool useFallbackWhenApiFails = true;
+  // AI 配置默认值
+  static const String defaultAIBaseUrl = 'https://api.openai.com';
+  static const String defaultAIModel = 'gpt-4o-mini';
 
-  /// 请求超时时间
-  static const Duration timeout = Duration(seconds: 10);
+  // AI 配置限制
+  static const int maxHistoryMessages = 10;
+  static const int maxTokens = 8192;
+  static const double defaultTemperature = 0.7;
 }

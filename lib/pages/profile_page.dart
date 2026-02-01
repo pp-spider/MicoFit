@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_profile.dart';
 import '../widgets/bottom_nav.dart';
-import '../providers/auth_provider.dart';
 
 /// 个人资料页面
 class ProfilePage extends StatefulWidget {
@@ -29,6 +27,11 @@ class _ProfilePageState extends State<ProfilePage> {
   late int _weeklyDays;
   late int _timeBudget;
 
+  // AI配置状态
+  final TextEditingController _baseUrlController = TextEditingController();
+  final TextEditingController _apiKeyController = TextEditingController();
+  final TextEditingController _modelController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -39,6 +42,86 @@ class _ProfilePageState extends State<ProfilePage> {
       _weeklyDays = 3;
       _timeBudget = 12;
     }
+    _loadAiConfig();
+  }
+
+  @override
+  void dispose() {
+    _baseUrlController.dispose();
+    _apiKeyController.dispose();
+    _modelController.dispose();
+    super.dispose();
+  }
+
+  // 加载AI配置
+  Future<void> _loadAiConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _baseUrlController.text = prefs.getString('ai_base_url') ?? '';
+      _apiKeyController.text = prefs.getString('ai_api_key') ?? '';
+      _modelController.text = prefs.getString('ai_model') ?? '';
+    });
+  }
+
+  // 保存AI配置
+  Future<void> _saveAiConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ai_base_url', _baseUrlController.text.trim());
+    await prefs.setString('ai_api_key', _apiKeyController.text.trim());
+    await prefs.setString('ai_model', _modelController.text.trim());
+    if (mounted) {
+      _showSuccessDialog('AI配置已保存');
+    }
+  }
+
+  // 显示成功提示弹窗
+  void _showSuccessDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => Center(
+        child: Container(
+          width: 200,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.15),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.check_circle_rounded,
+                size: 48,
+                color: Colors.green[600],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                message,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF115E59),
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    // 自动关闭弹窗
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.pop(context);
+      }
+    });
   }
 
   // 健身等级映射
@@ -216,7 +299,7 @@ class _ProfilePageState extends State<ProfilePage> {
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF2DD4BF).withOpacity(0.3),
+                            color: const Color(0xFF2DD4BF).withValues(alpha: 0.3),
                             blurRadius: 16,
                             offset: const Offset(0, 4),
                           ),
@@ -228,7 +311,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             width: 64,
                             height: 64,
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
+                              color: Colors.white.withValues(alpha: 0.2),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -255,7 +338,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                   _getFitnessLevelLabel(widget.userProfile!.fitnessLevel),
                                   style: TextStyle(
                                     fontSize: 14,
-                                    color: Colors.white.withOpacity(0.9),
+                                    color: Colors.white.withValues(alpha: 0.9),
                                   ),
                                 ),
                               ],
@@ -321,25 +404,16 @@ class _ProfilePageState extends State<ProfilePage> {
 
                     const SizedBox(height: 24),
 
+                    // AI配置卡片
+                    _buildAiConfigCard(),
+
+                    const SizedBox(height: 16),
+
                     // Actions
                     _buildActionButton(
                       icon: Icons.edit,
                       label: '修改个人信息',
                       onTap: () => widget.onNavigate('onboarding'),
-                    ),
-                    const SizedBox(height: 12),
-                    _buildActionButton(
-                      icon: Icons.logout,
-                      label: '退出登录',
-                      onTap: _showLogoutConfirmDialog,
-                      isSecondary: true,
-                    ),
-                    const SizedBox(height: 12),
-                    _buildActionButton(
-                      icon: Icons.refresh,
-                      label: '重新录入',
-                      onTap: _showResetConfirmDialog,
-                      isSecondary: true,
                     ),
 
                     const SizedBox(height: 100),
@@ -368,7 +442,7 @@ class _ProfilePageState extends State<ProfilePage> {
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -407,7 +481,7 @@ class _ProfilePageState extends State<ProfilePage> {
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -422,7 +496,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF8B5CF6).withOpacity(0.1),
+                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.flag, color: Color(0xFF8B5CF6), size: 20),
@@ -535,7 +609,7 @@ class _ProfilePageState extends State<ProfilePage> {
             activeTrackColor: const Color(0xFF2DD4BF),
             inactiveTrackColor: const Color(0xFFE5E7EB),
             thumbColor: const Color(0xFF2DD4BF),
-            overlayColor: const Color(0xFF2DD4BF).withOpacity(0.2),
+            overlayColor: const Color(0xFF2DD4BF).withValues(alpha: 0.2),
           ),
           child: Slider(
             value: value,
@@ -562,7 +636,7 @@ class _ProfilePageState extends State<ProfilePage> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -577,7 +651,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: color, size: 20),
@@ -625,127 +699,136 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // 显示重新录入确认对话框
-  void _showResetConfirmDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+  Widget _buildAiConfigCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
-          title: const Text(
-            '确认重新录入',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF115E59),
-            ),
-          ),
-          content: const Text(
-            '重新录入将清除当前的所有个人信息，您需要重新完成信息录入流程。\n\n确定要继续吗？',
-            style: TextStyle(
-              fontSize: 14,
-              color: Color(0xFF666666),
-              height: 1.5,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.grey[600],
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF8B5CF6),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.smart_toy, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'AI配置',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF115E59),
                 ),
               ),
-              child: const Text('取消'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                widget.onReset();
-              },
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Config Fields
+          _buildAiConfigField(
+            label: 'Base URL',
+            hint: 'https://api.openai.com',
+            controller: _baseUrlController,
+            icon: Icons.link,
+          ),
+          const SizedBox(height: 12),
+          _buildAiConfigField(
+            label: 'API Key',
+            hint: 'sk-...',
+            controller: _apiKeyController,
+            icon: Icons.key,
+            obscureText: true,
+          ),
+          const SizedBox(height: 12),
+          _buildAiConfigField(
+            label: 'Model',
+            hint: 'gpt-4o-mini',
+            controller: _modelController,
+            icon: Icons.psychology,
+          ),
+          const SizedBox(height: 16),
+          // Save Button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _saveAiConfig,
+              icon: const Icon(Icons.save, size: 18),
+              label: const Text('保存配置'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFEF4444),
+                backgroundColor: const Color(0xFF8B5CF6),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: const Text('确定'),
             ),
-          ],
-        );
-      },
+          ),
+        ],
+      ),
     );
   }
 
-  // 显示登出确认对话框
-  void _showLogoutConfirmDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+  Widget _buildAiConfigField({
+    required String label,
+    required String hint,
+    required TextEditingController controller,
+    required IconData icon,
+    bool obscureText = false,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: Color(0xFF115E59),
           ),
-          title: const Text(
-            '退出登录',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF115E59),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: controller,
+          obscureText: obscureText,
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
+            prefixIcon: Icon(icon, size: 20, color: const Color(0xFF8B5CF6)),
+            prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            filled: true,
+            fillColor: const Color(0xFFF5F5F0),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
             ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF8B5CF6), width: 2),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
-          content: const Text(
-            '确定要退出登录吗？',
-            style: TextStyle(
-              fontSize: 14,
-              color: Color(0xFF666666),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.grey[600],
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
-              ),
-              child: const Text('取消'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                Navigator.of(context).pop();
-                final authProvider = context.read<AuthProvider>();
-                final prefs = await SharedPreferences.getInstance();
-                await authProvider.logout(prefs);
-                widget.onNavigate('login');
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFEF4444),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: const Text('确定'),
-            ),
-          ],
-        );
-      },
+        ),
+      ],
     );
   }
 
@@ -764,7 +847,7 @@ class _ProfilePageState extends State<ProfilePage> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),

@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/workout.dart';
+import '../models/weekly_data.dart';
+import '../models/workout_progress.dart';
 import '../widgets/workout_card.dart';
 import '../widgets/bottom_nav.dart';
+import '../providers/monthly_stats_provider.dart';
+import '../providers/workout_progress_provider.dart';
 
 /// 今日计划页面
 class TodayPlanPage extends StatefulWidget {
@@ -53,28 +58,32 @@ class _TodayPlanPageState extends State<TodayPlanPage> {
 
             // Main Content
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 16),
+              child: Consumer<MonthlyStatsProvider>(
+                builder: (context, monthlyStatsProvider, child) {
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 16),
 
-                    // Workout Card
-                    WorkoutCard(
-                      workoutPlan: widget.workoutPlan,
-                      refreshCount: refreshCount,
-                      onRefresh: handleRefresh,
-                      onStartWorkout: widget.onStartWorkout,
+                        // Workout Card
+                        WorkoutCard(
+                          workoutPlan: widget.workoutPlan,
+                          refreshCount: refreshCount,
+                          onRefresh: handleRefresh,
+                          onStartWorkout: widget.onStartWorkout,
+                        ),
+
+                        const SizedBox(height: 24),
+
+                        // Quick Stats - 使用真实数据
+                        _buildQuickStats(monthlyStatsProvider.monthlyStats ?? MonthlyStats.createSample()),
+
+                        const SizedBox(height: 100), // Space for bottom nav
+                      ],
                     ),
-
-                    const SizedBox(height: 24),
-
-                    // Quick Stats
-                    _buildQuickStats(),
-
-                    const SizedBox(height: 100), // Space for bottom nav
-                  ],
-                ),
+                  );
+                },
               ),
             ),
           ],
@@ -89,110 +98,125 @@ class _TodayPlanPageState extends State<TodayPlanPage> {
   }
 
   Widget _buildHeader(String dayName, String timeOfDay) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$dayName$timeOfDay',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF115E59),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(Icons.wb_sunny, size: 16, color: Colors.grey[600]),
-                  const SizedBox(width: 4),
-                  Text(
-                    '18°C',
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          // Streak Badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 4,
-                ),
-              ],
-            ),
-            child: Row(
+    return RepaintBoundary(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(
-                  width: 32,
-                  height: 32,
-                  child: Stack(
-                    children: [
-                      SizedBox(
-                        width: 32,
-                        height: 32,
-                        child: CircularProgressIndicator(
-                          value: 3 / 7,
-                          strokeWidth: 3,
-                          backgroundColor: const Color(0xFFE5E7EB),
-                          valueColor: const AlwaysStoppedAnimation<Color>(
-                            Color(0xFF2DD4BF),
-                          ),
-                        ),
-                      ),
-                      const Center(
-                        child: Icon(
-                          Icons.local_fire_department,
-                          size: 14,
-                          color: Color(0xFF2DD4BF),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  '已坚持3天',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
+                Text(
+                  '$dayName$timeOfDay',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
                     color: Color(0xFF115E59),
                   ),
                 ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(Icons.wb_sunny, size: 16, color: Colors.grey[600]),
+                    const SizedBox(width: 4),
+                    Text(
+                      '微动时刻',
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
               ],
             ),
-          ),
-        ],
+            // 徽章区域（包含连续打卡徽章和进度状态徽章）
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Streak Badge
+                _StreakBadge(),
+                const SizedBox(width: 8),
+                // 进度状态徽章
+                _ProgressBadge(),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildQuickStats() {
+  Widget _buildQuickStats(MonthlyStats monthlyStats) {
+    final now = DateTime.now();
+    final todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
+    // 获取今日分钟数
+    final todayRecord = monthlyStats.records.firstWhere(
+      (r) => r.date == todayKey,
+      orElse: () => DayRecord(
+        date: todayKey,
+        dayOfWeek: now.weekday % 7,
+        duration: 0,
+        status: DayStatus.none,
+      ),
+    );
+    final todayMinutes = todayRecord.duration;
+
+    // 计算连续打卡天数
+    final streakDays = _calculateStreakDays(monthlyStats);
+
+    // 计算目标完成百分比
+    final progressPercent = monthlyStats.progressPercent.toInt();
+
     return Row(
       children: [
         Expanded(
-          child: _buildStatCard('12', '今日分钟', const Color(0xFF2DD4BF)),
+          child: _buildStatCard('$todayMinutes', '今日分钟', const Color(0xFF2DD4BF)),
         ),
         const SizedBox(width: 16),
         Expanded(
-          child: _buildStatCard('3', '连续打卡', const Color(0xFF10B981)),
+          child: _buildStatCard('$streakDays', '连续打卡', const Color(0xFF10B981)),
         ),
         const SizedBox(width: 16),
         Expanded(
-          child: _buildStatCard('85%', '目标完成', const Color(0xFF8B5CF6)),
+          child: _buildStatCard('$progressPercent%', '目标完成', const Color(0xFF8B5CF6)),
         ),
       ],
     );
+  }
+
+  /// 计算连续打卡天数（从今天往前推连续完成的天数）
+  int _calculateStreakDays(MonthlyStats monthlyStats) {
+    final now = DateTime.now();
+    int streakDays = 0;
+
+    // 从今天开始往前遍历，最多检查30天
+    for (int i = 0; i < 30; i++) {
+      final checkDate = now.subtract(Duration(days: i));
+      final dateKey = '${checkDate.year}-${checkDate.month.toString().padLeft(2, '0')}-${checkDate.day.toString().padLeft(2, '0')}';
+
+      // 查找该日期的记录
+      final record = monthlyStats.records.firstWhere(
+        (r) => r.date == dateKey,
+        orElse: () => DayRecord(
+          date: dateKey,
+          dayOfWeek: checkDate.weekday % 7,
+          duration: 0,
+          status: DayStatus.none,
+        ),
+      );
+
+      // 如果已完成或部分完成，继续计数；否则中断
+      if (record.status == DayStatus.completed || record.status == DayStatus.partial) {
+        streakDays++;
+      } else if (i == 0) {
+        // 今天未完成不算中断，继续往前检查
+        continue;
+      } else {
+        break;
+      }
+    }
+
+    return streakDays;
   }
 
   Widget _buildStatCard(String value, String label, Color color) {
@@ -203,7 +227,7 @@ class _TodayPlanPageState extends State<TodayPlanPage> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -228,6 +252,169 @@ class _TodayPlanPageState extends State<TodayPlanPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 连续打卡徽章 - 独立 widget 减少重建范围
+class _StreakBadge extends StatelessWidget {
+  const _StreakBadge();
+
+  int _calculateStreakDays(MonthlyStats monthlyStats) {
+    final now = DateTime.now();
+    int streakDays = 0;
+
+    for (int i = 0; i < 30; i++) {
+      final checkDate = now.subtract(Duration(days: i));
+      final dateKey = '${checkDate.year}-${checkDate.month.toString().padLeft(2, '0')}-${checkDate.day.toString().padLeft(2, '0')}';
+
+      final record = monthlyStats.records.firstWhere(
+        (r) => r.date == dateKey,
+        orElse: () => DayRecord(
+          date: dateKey,
+          dayOfWeek: checkDate.weekday % 7,
+          duration: 0,
+          status: DayStatus.none,
+        ),
+      );
+
+      if (record.status == DayStatus.completed || record.status == DayStatus.partial) {
+        streakDays++;
+      } else if (i == 0) {
+        continue;
+      } else {
+        break;
+      }
+    }
+
+    return streakDays;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: Consumer<MonthlyStatsProvider>(
+        builder: (context, provider, child) {
+          final streakDays = _calculateStreakDays(provider.monthlyStats ?? MonthlyStats.createSample());
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 4,
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Stack(
+                    children: [
+                      SizedBox(
+                        width: 32,
+                        height: 32,
+                        child: CircularProgressIndicator(
+                          value: (streakDays % 7) / 7,
+                          strokeWidth: 3,
+                          backgroundColor: const Color(0xFFE5E7EB),
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            Color(0xFF2DD4BF),
+                          ),
+                        ),
+                      ),
+                      const Center(
+                        child: Icon(
+                          Icons.local_fire_department,
+                          size: 14,
+                          color: Color(0xFF2DD4BF),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '已坚持$streakDays天',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF115E59),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 进度状态徽章 - 独立 widget 减少重建范围
+class _ProgressBadge extends StatelessWidget {
+  const _ProgressBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: Consumer<WorkoutProgressProvider>(
+        builder: (context, provider, child) {
+          if (!provider.hasProgress) {
+            return const SizedBox.shrink();
+          }
+
+          final progress = provider.progress!;
+          final status = progress.status;
+
+          String label;
+          Color color;
+          IconData icon;
+
+          switch (status) {
+            case WorkoutStatus.notStarted:
+              return const SizedBox.shrink();
+            case WorkoutStatus.inProgress:
+              final percent = (progress.progressPercent * 100).toInt();
+              label = '进行中 $percent%';
+              color = const Color(0xFF2DD4BF);
+              icon = Icons.fitness_center;
+              break;
+            case WorkoutStatus.completed:
+              label = '已完成';
+              color = const Color(0xFF10B981);
+              icon = Icons.check_circle;
+              break;
+          }
+
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: color.withValues(alpha: 0.5)),
+            ),
+            child: Row(
+              children: [
+                Icon(icon, size: 16, color: color),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
