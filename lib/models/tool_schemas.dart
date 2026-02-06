@@ -47,7 +47,7 @@ class AIToolSchemas {
       type: 'function',
       function: OpenAIFunctionModel(
         name: 'get_user_profile',
-        description: '获取用户的健身画像信息，包括基本信息、健身水平、目标、场景、时间预算、身体限制、可用装备等',
+        description: '【谨慎使用】仅在以下情况调用：1)用户明确要求查看其完整档案；2)需要验证系统提示词中的用户信息是否过时；3)生成健身计划时已知信息不完整。注意：系统提示词已包含用户画像数据，应优先使用。',
         parametersSchema: {
           'type': 'object',
           'properties': <String, dynamic>{},

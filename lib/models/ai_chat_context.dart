@@ -61,45 +61,63 @@ class AIChatContext {
     // Function Calling 工具使用说明
     buffer.writeln('**工具使用**');
     buffer.writeln('你可以使用以下工具获取信息：');
-    buffer.writeln('- get_user_profile: 获取用户的健身画像信息（包括昵称、健身水平、目标、场景、时间预算、身体限制、可用装备等）');
+    buffer.writeln('- get_user_profile: 获取用户的完整健身画像信息（仅在必要时调用）');
     buffer.writeln();
-    buffer.writeln('使用时机：');
-    buffer.writeln('- 当需要了解用户基本信息、目标、限制时');
-    buffer.writeln('- 当用户提到"我的情况"、"根据我的资料"时');
-    buffer.writeln('- 当需要个性化建议或生成健身计划时');
+    buffer.writeln('【重要】用户画像信息已在下方提供，请优先使用这些已知信息。');
+    buffer.writeln('仅在以下情况调用工具：');
+    buffer.writeln('1. 用户明确要求"查看我的完整档案/信息"时');
+    buffer.writeln('2. 系统提示词中的用户信息不完整，且该缺失信息对回答至关重要时');
+    buffer.writeln('3. 生成健身计划时上方信息区域明显缺失关键字段时');
     buffer.writeln();
-    buffer.writeln('**重要**：不要假设或编造用户信息，请使用工具获取准确数据。');
+    buffer.writeln('禁止在以下情况调用工具：');
+    buffer.writeln('- 仅为了问候或一般性建议而获取信息');
+    buffer.writeln('- 系统提示词中已有足够信息回答用户问题时');
+    buffer.writeln('- 用户只是泛泛提及"我"而没有具体查询需求时');
     buffer.writeln();
 
-    // 如果有直接传入的用户信息，也可以显示
-    if (userNickname != null) buffer.writeln('（已知用户昵称：$userNickname）');
-    if (fitnessLevel != null) buffer.writeln('（已知健身水平：$fitnessLevel）');
-    if (goal != null) buffer.writeln('（已知健身目标：$goal）');
-    if (scene != null) buffer.writeln('（已知常用场景：$scene）');
-    if (timeBudget != null) buffer.writeln('（已知时间预算：每次约$timeBudget分钟）');
+    // 明确区分已知信息区域
+    buffer.writeln('---');
+    buffer.writeln('**【系统提供的用户画像信息】（以下信息为已知数据，请直接使用）**');
+    buffer.writeln();
+
+    if (userNickname != null) buffer.writeln('- **昵称**：$userNickname');
+    if (fitnessLevel != null) buffer.writeln('- **健身水平**：$fitnessLevel');
+    if (goal != null) buffer.writeln('- **健身目标**：$goal');
+    if (scene != null) buffer.writeln('- **常用场景**：$scene');
+    if (timeBudget != null) buffer.writeln('- **时间预算**：每次约$timeBudget分钟');
     if (limitations != null && limitations!.isNotEmpty) {
-      buffer.writeln('（已知身体限制：${limitations!.join('、')}）');
+      buffer.writeln('- **身体限制**：${limitations!.join('、')}');
     }
-    if (equipment != null) buffer.writeln('（已知可用装备：$equipment）');
+    if (equipment != null) buffer.writeln('- **可用装备**：$equipment');
 
+    buffer.writeln();
+    buffer.writeln('---');
     buffer.writeln();
     buffer.writeln('回复要求：');
     buffer.writeln('1. 专业但易懂，避免过于专业的术语');
-    buffer.writeln('2. 结合用户的具体情况给出针对性建议（使用工具获取准确信息）');
-    buffer.writeln('3. 如果涉及伤病，请提醒用户咨询医生');
-    buffer.writeln('4. 保持友好鼓励的语气');
-    buffer.writeln('5. 回复简洁有力，重点突出');
-    buffer.writeln('6. 使用emoji适当点缀，让回复更生动');
+    buffer.writeln('2. 【优先使用已知信息】首先基于系统提示词中提供的用户画像信息给出针对性建议');
+    buffer.writeln('3. 仅在已知信息不足且无法给出合理建议时，才考虑调用工具获取更多数据');
+    buffer.writeln('4. 如果涉及伤病，请提醒用户咨询医生');
+    buffer.writeln('5. 保持友好鼓励的语气');
+    buffer.writeln('6. 回复简洁有力，重点突出');
+    buffer.writeln('7. 使用emoji适当点缀，让回复更生动');
 
     buffer.writeln();
     buffer.writeln('**健身计划生成**');
-    buffer.writeln('当用户要求生成、修改或调整今日健身计划时，你必须:');
+    buffer.writeln('当用户要求生成、修改或调整今日健身计划时:');
     buffer.writeln();
-    buffer.writeln('1. 首先调用 get_user_profile 工具获取用户画像');
-    buffer.writeln('2. 根据工具返回的数据判断：');
-    buffer.writeln('   - 如果 hasProfile 为 false，引导用户先完成画像设置');
-    buffer.writeln('   - 如果 hasProfile 为 true，基于返回的信息直接生成计划');
-    buffer.writeln('   - 只询问可能遗漏的具体需求（如：今天想重点练哪个部位）');
+    buffer.writeln('1. 【优先使用已知信息】首先检查上方"系统提供的用户画像信息"区域');
+    buffer.writeln('   - 如果该区域信息完整（包含目标、水平、场景、时间、限制等），直接使用这些信息生成计划');
+    buffer.writeln('   - 无需调用 get_user_profile 工具');
+    buffer.writeln();
+    buffer.writeln('2. 【工具调用条件】仅在以下情况才调用 get_user_profile：');
+    buffer.writeln('   - 上方用户信息区域明显缺失关键字段（如没有目标、场景或时间预算）');
+    buffer.writeln('   - 用户明确提到"更新我的信息"或"查看最新设置"');
+    buffer.writeln('   - 你需要确认系统提示词中的信息是否为最新数据');
+    buffer.writeln();
+    buffer.writeln('3. 【信息不完整处理】');
+    buffer.writeln('   - 如果 hasProfile 为 false（用户未设置画像），引导用户先完成画像设置');
+    buffer.writeln('   - 如果部分信息缺失，可基于已有信息生成计划，并在回复中询问缺失部分');
     buffer.writeln();
     buffer.writeln('2. 需求明确后，按以下格式输出:');
     buffer.writeln('   - 先用简洁友好的文字说明计划亮点');

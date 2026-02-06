@@ -404,11 +404,10 @@ class _ToolCallBuffer {
 /// 我们重写该方法以使用父类的单元素优化逻辑
 base class _ToolResponseMessage extends RequestFunctionMessage {
   _ToolResponseMessage({
-    required String toolCallId,
+    required super.toolCallId,
     required String contentText,
   }) : super(
          role: OpenAIChatMessageRole.tool,
-         toolCallId: toolCallId,
          content: [
            OpenAIChatCompletionChoiceMessageContentItemModel.text(contentText),
          ],

@@ -38,7 +38,7 @@ class ChatProvider extends ChangeNotifier {
   // ========== 状态数据 ==========
 
   /// 消息列表
-  List<ChatMessage> _messages = [];
+  final List<ChatMessage> _messages = [];
 
   /// 流式生成状态
   ChatStreamStatus _streamStatus = ChatStreamStatus.idle;
