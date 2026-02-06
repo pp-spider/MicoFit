@@ -4,16 +4,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/user_profile.dart';
 import '../services/workout_local_service.dart';
+import '../services/user_api_service.dart';
 
 /// 用户画像状态管理
 class UserProfileProvider extends ChangeNotifier {
   final SharedPreferences _prefs;
+  final UserApiService _apiService;
 
   UserProfile? _profile;
   bool _isLoading = false;
   String? _errorMessage;
 
-  UserProfileProvider({required SharedPreferences prefs}) : _prefs = prefs;
+  UserProfileProvider({
+    required SharedPreferences prefs,
+    UserApiService? apiService,
+  })  : _prefs = prefs,
+        _apiService = apiService ?? UserApiService();
 
   // Getters
   UserProfile? get profile => _profile;
@@ -21,12 +27,27 @@ class UserProfileProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get hasProfile => _profile != null;
 
-  /// 初始化
+  /// 初始化 - 优先从后端获取，失败时回退到本地
   Future<void> init() async {
-    // 使用 Future.microtask 避免在 build 阶段调用 notifyListeners
-    await Future.microtask(() {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      // 尝试从后端获取用户画像
+      final serverProfile = await _apiService.getProfile();
+      _profile = serverProfile;
+      // 同步到本地
+      await _saveToLocal(_profile!);
+      debugPrint('从后端加载用户画像成功');
+    } catch (e) {
+      // 后端获取失败，尝试从本地加载
+      debugPrint('从后端加载用户画像失败: $e，尝试从本地加载');
       _loadFromLocal();
-    });
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
   }
 
   /// 从本地加载
@@ -43,7 +64,7 @@ class UserProfileProvider extends ChangeNotifier {
     }
   }
 
-  /// 保存用户画像（本地）
+  /// 保存用户画像（本地+后端）
   Future<void> saveProfile(UserProfile profile) async {
     _isLoading = true;
     _errorMessage = null;
@@ -51,7 +72,20 @@ class UserProfileProvider extends ChangeNotifier {
 
     try {
       _profile = profile;
+      // 1. 先保存到本地
       await _saveToLocal(_profile!);
+
+      // 2. 尝试同步到后端（使用 upsert，不存在则创建，存在则更新）
+      try {
+        final serverProfile = await _apiService.upsertProfile(_profile!);
+        _profile = serverProfile;
+        await _saveToLocal(_profile!);
+        debugPrint('用户画像同步到后端成功');
+      } catch (e) {
+        debugPrint('用户画像同步到后端失败: $e');
+        // 后端同步失败不影响本地保存，后续可以再次同步
+      }
+
       // 清除训练计划缓存，以便下次加载时基于新画像生成
       await WorkoutLocalService().clearCache();
     } catch (e) {
@@ -94,6 +128,54 @@ class UserProfileProvider extends ChangeNotifier {
     );
 
     await saveProfile(updatedProfile);
+  }
+
+  /// 从后端获取最新用户画像
+  Future<bool> fetchFromServer() async {
+    if (_isLoading) return false;
+
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final serverProfile = await _apiService.getProfile();
+      _profile = serverProfile;
+      await _saveToLocal(_profile!);
+      debugPrint('从后端获取用户画像成功');
+      return true;
+    } catch (e) {
+      debugPrint('从后端获取用户画像失败: $e');
+      _errorMessage = '获取用户画像失败: $e';
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// 同步本地画像到后端
+  Future<bool> syncToServer() async {
+    if (_profile == null) return false;
+
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final serverProfile = await _apiService.upsertProfile(_profile!);
+      _profile = serverProfile;
+      await _saveToLocal(_profile!);
+      debugPrint('同步用户画像到后端成功');
+      return true;
+    } catch (e) {
+      debugPrint('同步用户画像到后端失败: $e');
+      _errorMessage = '同步失败: $e';
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
   }
 
   /// 清除用户画像

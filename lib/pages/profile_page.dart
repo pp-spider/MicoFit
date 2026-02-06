@@ -8,14 +8,16 @@ class ProfilePage extends StatefulWidget {
   final UserProfile? userProfile;
   final Function(String) onNavigate;
   final VoidCallback onReset;
-  final Function(int weeklyDays, int timeBudget)? onSaveGoals;  // 新增
+  final Function(int weeklyDays, int timeBudget)? onSaveGoals; // 新增
+  final VoidCallback? onLogout; // 退出登录回调
 
   const ProfilePage({
     super.key,
     required this.userProfile,
     required this.onNavigate,
     required this.onReset,
-    this.onSaveGoals,  // 新增
+    this.onSaveGoals, // 新增
+    this.onLogout,
   });
 
   @override
@@ -122,6 +124,68 @@ class _ProfilePageState extends State<ProfilePage> {
         Navigator.pop(context);
       }
     });
+  }
+
+  // 显示退出登录确认对话框
+  void _showLogoutConfirmDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Row(
+          children: [
+            Icon(
+              Icons.logout,
+              color: Color(0xFF115E59),
+            ),
+            SizedBox(width: 12),
+            Text(
+              '退出登录',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF115E59),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          '确定要退出登录吗？退出后需要重新登录才能使用。',
+          style: TextStyle(
+            fontSize: 15,
+            color: Color(0xFF115E59),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              '取消',
+              style: TextStyle(
+                color: Colors.grey[600],
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              widget.onLogout?.call();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2DD4BF),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
   }
 
   // 健身等级映射
@@ -415,6 +479,17 @@ class _ProfilePageState extends State<ProfilePage> {
                       label: '修改个人信息',
                       onTap: () => widget.onNavigate('onboarding'),
                     ),
+
+                    const SizedBox(height: 12),
+
+                    // 退出登录按钮
+                    if (widget.onLogout != null)
+                      _buildActionButton(
+                        icon: Icons.logout,
+                        label: '退出登录',
+                        onTap: () => _showLogoutConfirmDialog(),
+                        isSecondary: true,
+                      ),
 
                     const SizedBox(height: 100),
                   ],

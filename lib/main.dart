@@ -10,6 +10,8 @@ import 'pages/weekly_view_page.dart';
 import 'pages/onboarding_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/ai_chat_page.dart';
+import 'pages/splash_page.dart';
+import 'pages/login_page.dart';
 import 'models/exercise.dart';
 import 'models/user_profile.dart';
 import 'models/weekly_data.dart';
@@ -18,6 +20,7 @@ import 'providers/workout_provider.dart';
 import 'providers/monthly_stats_provider.dart';
 import 'providers/workout_progress_provider.dart';
 import 'providers/chat_provider.dart';
+import 'providers/auth_provider.dart';
 import 'utils/user_id_generator.dart';
 import 'models/workout_progress.dart';
 
@@ -38,9 +41,15 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
+        // 认证 Provider - 必须最先初始化
+        ChangeNotifierProvider(
+          create: (_) => AuthProvider()..init(),
+        ),
+        // 用户画像 Provider
         ChangeNotifierProvider(
           create: (_) => UserProfileProvider(prefs: prefs)..init(),
         ),
+        // 其他 Provider
         ChangeNotifierProvider(
           create: (_) => WorkoutProvider(),
         ),
@@ -145,8 +154,8 @@ class MainPage extends StatefulWidget {
 }
 
 class _MainPageState extends State<MainPage> {
-  // 当前页面
-  String _currentPage = 'loading';
+  // 当前页面 - 默认显示启动页
+  String _currentPage = 'splash';
 
   // 数据
   Exercise? _selectedExercise;
@@ -166,20 +175,70 @@ class _MainPageState extends State<MainPage> {
   DateTime? _lastBackPressedTime;
   static const _exitTimeLimit = Duration(seconds: 2);
 
+  AuthProvider? _authProvider;
+
   @override
   void initState() {
     super.initState();
-    _loadUserProfile();
+
+    // 保存 provider 引用以便在 dispose 中使用
+    _authProvider = context.read<AuthProvider>();
+    _authProvider?.addListener(_onAuthStateChanged);
+
+    // 如果已经认证，加载用户数据
+    if (_authProvider?.isAuthenticated ?? false) {
+      _loadUserProfile();
+    }
+  }
+
+  @override
+  void dispose() {
+    _authProvider?.removeListener(_onAuthStateChanged);
+    super.dispose();
+  }
+
+  /// 认证状态变化回调
+  void _onAuthStateChanged() {
+    if (!mounted) return;
+
+    final authProvider = _authProvider;
+    if (authProvider == null) return;
+
+    // 如果认证成功且当前在登录/启动页，加载用户数据
+    if (authProvider.isAuthenticated &&
+        !authProvider.isLoading &&
+        (_currentPage == 'login' || _currentPage == 'splash')) {
+      _loadUserProfile();
+    }
+
+    // 如果认证失效且当前不在登录页，跳转到登录页
+    if (!authProvider.isAuthenticated &&
+        !authProvider.isLoading &&
+        _currentPage != 'login' &&
+        _currentPage != 'splash') {
+      setState(() => _currentPage = 'login');
+    }
   }
 
   // 加载用户画像
   Future<void> _loadUserProfile() async {
+    if (!mounted) return;
+
+    final authProvider = _authProvider;
     final profileProvider = context.read<UserProfileProvider>();
     final workoutProvider = context.read<WorkoutProvider>();
     final statsProvider = context.read<MonthlyStatsProvider>();
 
-    // 初始化并检查本地画像
+    if (authProvider == null || !authProvider.isAuthenticated) {
+      // 未登录，跳转到登录页
+      if (mounted) setState(() => _currentPage = 'login');
+      return;
+    }
+
+    // 已登录，初始化并检查用户画像
     await profileProvider.init();
+
+    if (!mounted) return;
 
     if (profileProvider.hasProfile) {
       // 有画像：加载训练计划和月度统计，跳转今日计划
@@ -570,10 +629,40 @@ class _MainPageState extends State<MainPage> {
 
   // 重置用户画像
   void _handleReset() async {
+    // 登出
+    await context.read<AuthProvider>().logout();
+    // 清除本地画像
     await context.read<UserProfileProvider>().clearProfile();
-    setState(() {
-      _currentPage = 'onboarding';
-    });
+    // 跳转到登录页
+    if (mounted) {
+      setState(() {
+        _currentPage = 'login';
+      });
+    }
+  }
+
+  // 退出登录
+  void _handleLogout() async {
+    // 显示加载指示器
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    // 执行登出
+    await context.read<AuthProvider>().logout();
+
+    if (mounted) {
+      // 关闭加载指示器
+      Navigator.of(context).pop();
+      // 跳转到登录页
+      setState(() {
+        _currentPage = 'login';
+      });
+    }
   }
 
   // 显示成功提示弹窗
@@ -650,6 +739,16 @@ class _MainPageState extends State<MainPage> {
             child: CircularProgressIndicator(),
           ),
         );
+
+      case 'splash':
+        return SplashPage(
+          onNeedLogin: () {
+            setState(() => _currentPage = 'login');
+          },
+        );
+
+      case 'login':
+        return const LoginPage();
 
       case 'onboarding':
         final profile = context.watch<UserProfileProvider>().profile;
@@ -771,6 +870,7 @@ class _MainPageState extends State<MainPage> {
                 );
                 _showSuccessDialog('目标已保存');
               },
+              onLogout: _handleLogout,
             );
           },
         );
