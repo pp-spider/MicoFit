@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 
 import 'pages/today_plan_page.dart';
@@ -22,6 +21,7 @@ import 'providers/workout_progress_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/auth_provider.dart';
 import 'utils/user_id_generator.dart';
+import 'utils/user_data_helper.dart';
 import 'models/workout_progress.dart';
 
 /// 微动 MicoFit - Flutter 应用入口
@@ -31,9 +31,6 @@ void main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
-
-  // 初始化 SharedPreferences
-  final prefs = await SharedPreferences.getInstance();
 
   // 创建本地用户ID
   await UserIdGenerator.getOrCreateLocalUserId();
@@ -47,7 +44,7 @@ void main() async {
         ),
         // 用户画像 Provider
         ChangeNotifierProvider(
-          create: (_) => UserProfileProvider(prefs: prefs)..init(),
+          create: (_) => UserProfileProvider()..init(),
         ),
         // 其他 Provider
         ChangeNotifierProvider(
@@ -60,9 +57,7 @@ void main() async {
           create: (_) => WorkoutProgressProvider()..loadTodayProgress(),
         ),
         ChangeNotifierProvider(
-          create: (context) => ChatProvider(
-            userProfileProvider: context.read<UserProfileProvider>(),
-          )..loadHistory(),
+          create: (_) => ChatProvider(), // 不在此处加载历史，等登录后再加载
         ),
       ],
       child: const MicoFitApp(),
@@ -185,10 +180,28 @@ class _MainPageState extends State<MainPage> {
     _authProvider = context.read<AuthProvider>();
     _authProvider?.addListener(_onAuthStateChanged);
 
-    // 如果已经认证，加载用户数据
-    if (_authProvider?.isAuthenticated ?? false) {
+    // 检查当前认证状态（处理 AuthProvider.init() 已完成的情况）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAuthStateAndLoad();
+    });
+  }
+
+  /// 检查认证状态并加载数据
+  void _checkAuthStateAndLoad() {
+    if (!mounted) return;
+
+    final authProvider = _authProvider;
+    if (authProvider == null) return;
+
+    // 如果已经认证且不在加载中，加载用户数据
+    if (authProvider.isAuthenticated && !authProvider.isLoading) {
+      debugPrint('[MainPage] 初始化时检测到已登录用户，加载数据');
       _loadUserProfile();
+    } else if (!authProvider.isAuthenticated && !authProvider.isLoading) {
+      // 未登录，跳转到登录页
+      setState(() => _currentPage = 'login');
     }
+    // 如果正在加载中，等待监听器回调
   }
 
   @override
@@ -204,18 +217,23 @@ class _MainPageState extends State<MainPage> {
     final authProvider = _authProvider;
     if (authProvider == null) return;
 
+    // 如果正在加载中，不处理
+    if (authProvider.isLoading) return;
+
     // 如果认证成功且当前在登录/启动页，加载用户数据
     if (authProvider.isAuthenticated &&
-        !authProvider.isLoading &&
         (_currentPage == 'login' || _currentPage == 'splash')) {
+      debugPrint('[MainPage] 认证状态变化：用户已登录，加载数据');
       _loadUserProfile();
     }
 
     // 如果认证失效且当前不在登录页，跳转到登录页
     if (!authProvider.isAuthenticated &&
-        !authProvider.isLoading &&
         _currentPage != 'login' &&
         _currentPage != 'splash') {
+      debugPrint('[MainPage] 认证状态变化：用户已登出，清除数据');
+      // 清除聊天内存数据（用户数据隔离）
+      context.read<ChatProvider>().clearMemoryData();
       setState(() => _currentPage = 'login');
     }
   }
@@ -228,6 +246,7 @@ class _MainPageState extends State<MainPage> {
     final profileProvider = context.read<UserProfileProvider>();
     final workoutProvider = context.read<WorkoutProvider>();
     final statsProvider = context.read<MonthlyStatsProvider>();
+    final chatProvider = context.read<ChatProvider>();
 
     if (authProvider == null || !authProvider.isAuthenticated) {
       // 未登录，跳转到登录页
@@ -235,10 +254,24 @@ class _MainPageState extends State<MainPage> {
       return;
     }
 
+    // 确保用户ID已设置（用户数据隔离）
+    final userId = authProvider.user?.id;
+    if (userId != null && userId.isNotEmpty) {
+      // 如果内存中已有数据，先清除（防止用户切换时看到旧数据）
+      if (chatProvider.messages.isNotEmpty) {
+        chatProvider.clearMemoryData();
+      }
+      UserDataHelper.setCurrentUserId(userId);
+      debugPrint('[MainPage] 已设置当前用户ID: $userId');
+    }
+
     // 已登录，初始化并检查用户画像
     await profileProvider.init();
 
     if (!mounted) return;
+
+    // 加载当前用户的聊天历史（用户隔离）
+    await chatProvider.loadHistory();
 
     if (profileProvider.hasProfile) {
       // 有画像：加载训练计划和月度统计，跳转今日计划
@@ -631,6 +664,7 @@ class _MainPageState extends State<MainPage> {
   void _handleReset() async {
     // 登出
     await context.read<AuthProvider>().logout();
+    if (!mounted) return;
     // 清除本地画像
     await context.read<UserProfileProvider>().clearProfile();
     // 跳转到登录页

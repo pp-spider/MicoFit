@@ -1,29 +1,55 @@
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/exercise.dart';
 import '../models/workout.dart';
 import '../models/user_profile.dart';
 import '../utils/sample_data.dart';
+import '../utils/user_data_helper.dart';
 
 /// 本地训练计划服务 - 负责生成今日训练计划
 class WorkoutLocalService {
+  /// 获取今日缓存的计划（不生成新计划）
+  Future<WorkoutPlan?> getCachedTodayWorkout() async {
+    final today = DateTime.now();
+    final dateKey = 'workout_cache_${today.year}-${today.month}-${today.day}';
+
+    final cachedPlan = await UserDataHelper.getString(dateKey);
+    if (cachedPlan != null) {
+      try {
+        return WorkoutPlan.fromJson(jsonDecode(cachedPlan));
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /// 缓存训练计划
+  Future<void> cacheWorkout(WorkoutPlan plan) async {
+    final today = DateTime.now();
+    final dateKey = 'workout_cache_${today.year}-${today.month}-${today.day}';
+    await UserDataHelper.setString(dateKey, jsonEncode(plan.toJson()));
+  }
+
   /// 清除训练计划缓存
   Future<void> clearCache() async {
-    final prefs = await SharedPreferences.getInstance();
     final today = DateTime.now();
-    final dateKey = '${today.year}-${today.month}-${today.day}';
-    await prefs.remove('workout_cache_$dateKey');
+    final dateKey = 'workout_cache_${today.year}-${today.month}-${today.day}';
+    await UserDataHelper.remove(dateKey);
+  }
+
+  /// 清除当前用户的所有训练数据
+  Future<void> clearAllUserWorkoutData() async {
+    await UserDataHelper.clearCurrentUserData();
   }
 
   /// 生成今日训练计划
   Future<WorkoutPlan> generateTodayWorkout() async {
-    final prefs = await SharedPreferences.getInstance();
     final today = DateTime.now();
-    final dateKey = '${today.year}-${today.month}-${today.day}';
+    final dateKey = 'workout_cache_${today.year}-${today.month}-${today.day}';
 
     // 检查是否已有今日计划（缓存）
-    final cachedPlan = prefs.getString('workout_cache_$dateKey');
+    final cachedPlan = await UserDataHelper.getString(dateKey);
     if (cachedPlan != null) {
       try {
         return WorkoutPlan.fromJson(jsonDecode(cachedPlan));
@@ -34,7 +60,7 @@ class WorkoutLocalService {
 
     // 获取用户画像（如果有）
     UserProfile? profile;
-    final profileJson = prefs.getString(AppConfig.keyUserProfile);
+    final profileJson = await UserDataHelper.getString(AppConfig.keyUserProfile);
     if (profileJson != null) {
       try {
         final profileMap = jsonDecode(profileJson) as Map<String, dynamic>;
@@ -48,19 +74,18 @@ class WorkoutLocalService {
     final plan = _generatePlanBasedOnProfile(profile ?? _getDefaultProfile());
 
     // 缓存今日计划
-    await prefs.setString('workout_cache_$dateKey', jsonEncode(plan.toJson()));
+    await UserDataHelper.setString(dateKey, jsonEncode(plan.toJson()));
 
     return plan;
   }
 
   /// 刷新训练计划（生成新计划）
   Future<WorkoutPlan> refreshWorkout() async {
-    final prefs = await SharedPreferences.getInstance();
     final today = DateTime.now();
-    final dateKey = '${today.year}-${today.month}-${today.day}';
+    final dateKey = 'workout_cache_${today.year}-${today.month}-${today.day}';
 
     // 清除今日缓存
-    await prefs.remove('workout_cache_$dateKey');
+    await UserDataHelper.remove(dateKey);
 
     // 重新生成计划（使用不同的随机种子）
     return await generateTodayWorkout();

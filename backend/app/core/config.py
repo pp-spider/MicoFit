@@ -2,9 +2,9 @@
 from pydantic_settings import BaseSettings
 from typing import List
 from pathlib import Path
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 
-# load_dotenv()
+load_dotenv()
 
 class Settings(BaseSettings):
     """应用配置"""
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # 数据库配置
     DB_HOST: str = "localhost"
     DB_PORT: int = 3306
-    DB_USER: str = "micofit"
+    DB_USER: str = "root"
     DB_PASSWORD: str = ""
     DB_NAME: str = "micofit_db"
 
@@ -42,8 +42,20 @@ class Settings(BaseSettings):
         "http://127.0.0.1:8080",
     ]
 
+    # AI 配置
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_TEMPERATURE: float = 0.7
+    OPENAI_MAX_TOKENS: int = 8192
+
+    # LangSmith 监控配置（可选）
+    LANGCHAIN_TRACING_V2: bool = False
+    LANGCHAIN_API_KEY: str = ""
+    LANGCHAIN_PROJECT: str = "micofit"
+
     class Config:
-        env_file = "backend\.env"
+        env_file = "backend/.env"
         case_sensitive = True
 
 

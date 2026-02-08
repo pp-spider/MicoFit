@@ -1,11 +1,11 @@
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/workout_record.dart';
 import '../models/weekly_data.dart';
 import '../models/feedback.dart';
+import '../utils/user_data_helper.dart';
 
-/// 本地记录服务 - 负责训练记录的保存和查询
+/// 本地记录服务 - 负责训练记录的保存和查询（用户数据隔离）
 class RecordLocalService {
   /// 保存训练反馈和记录
   Future<void> saveFeedback({
@@ -13,10 +13,8 @@ class RecordLocalService {
     required WorkoutFeedback feedback,
     required int duration,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-
     // 加载现有记录
-    final recordsJson = prefs.getString(AppConfig.keyWorkoutRecords);
+    final recordsJson = await UserDataHelper.getString(AppConfig.keyWorkoutRecords);
     final List<dynamic> recordsList =
         recordsJson != null ? jsonDecode(recordsJson) as List : [];
 
@@ -31,7 +29,7 @@ class RecordLocalService {
     recordsList.add(newRecord.toJson());
 
     // 保存回存储
-    await prefs.setString(
+    await UserDataHelper.setString(
       AppConfig.keyWorkoutRecords,
       jsonEncode(recordsList),
     );
@@ -39,8 +37,7 @@ class RecordLocalService {
 
   /// 加载所有训练记录
   Future<List<WorkoutRecord>> _loadAllRecords() async {
-    final prefs = await SharedPreferences.getInstance();
-    final recordsJson = prefs.getString(AppConfig.keyWorkoutRecords);
+    final recordsJson = await UserDataHelper.getString(AppConfig.keyWorkoutRecords);
 
     if (recordsJson == null) return [];
 
@@ -110,9 +107,8 @@ class RecordLocalService {
       ));
     }
 
-    // 获取用户画像来确定目标分钟数（可选，这里使用默认值）
-    final prefs = await SharedPreferences.getInstance();
-    final profileJson = prefs.getString(AppConfig.keyUserProfile);
+    // 获取用户画像来确定目标分钟数
+    final profileJson = await UserDataHelper.getString(AppConfig.keyUserProfile);
     int targetMinutes = 300; // 默认目标300分钟/月
 
     if (profileJson != null) {
@@ -149,7 +145,6 @@ class RecordLocalService {
 
   /// 清除所有记录
   Future<void> clearAllRecords() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(AppConfig.keyWorkoutRecords);
+    await UserDataHelper.remove(AppConfig.keyWorkoutRecords);
   }
 }

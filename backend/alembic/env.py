@@ -4,10 +4,15 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # 导入配置和模型
 from app.core.config import settings
 from app.db.base import Base
+
+print("用户：", settings.DB_USER)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

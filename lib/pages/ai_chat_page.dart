@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/chat_message.dart';
 import '../models/exercise.dart';
 import '../models/workout.dart';
@@ -28,13 +27,6 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
-
-  // AI配置
-  String _baseUrl = '';
-  String _apiKey = '';
-  String _model = '';
-  bool _isLoadingConfig = true;
-  bool _hasConfig = false;
 
   // 动画控制器
   late AnimationController _pulseController;
@@ -172,7 +164,6 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
-    _loadAiConfig();
     // 动画完成后滚动到底部
     Future.delayed(const Duration(milliseconds: 100), () {
       _slideController.forward();
@@ -197,18 +188,6 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  /// 加载AI配置
-  Future<void> _loadAiConfig() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _baseUrl = prefs.getString('ai_base_url') ?? '';
-      _apiKey = prefs.getString('ai_api_key') ?? '';
-      _model = prefs.getString('ai_model') ?? '';
-      _hasConfig = _baseUrl.isNotEmpty && _apiKey.isNotEmpty && _model.isNotEmpty;
-      _isLoadingConfig = false;
-    });
-  }
-
   /// 发送快捷问题
   void _sendQuickQuestion(String question) {
     _textController.text = question;
@@ -219,12 +198,6 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   Future<void> _sendMessage() async {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
-
-    // 检查AI配置
-    if (!_hasConfig) {
-      _showConfigRequiredBottomSheet();
-      return;
-    }
 
     // 检查是否正在流式生成
     final chatProvider = context.read<ChatProvider>();
@@ -250,92 +223,6 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
         );
       }
     });
-  }
-
-  /// 显示配置提示弹窗
-  void _showConfigRequiredBottomSheet() {
-    showDialog(
-      context: context,
-      builder: (context) => Center(
-        child: Container(
-          width: 280,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.settings_suggest_rounded,
-                size: 56,
-                color: Colors.amber[700],
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                '需要配置AI',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF115E59),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '请先配置AI参数才能使用聊天功能',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey[600],
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('取消'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        widget.onNavigate('profile');
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2DD4BF),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('去配置'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   /// 显示清空聊天记录确认对话框
@@ -479,9 +366,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
               children: [
                 // Messages List
                 Expanded(
-                  child: _isLoadingConfig
-                      ? const Center(child: CircularProgressIndicator())
-                      : _buildChatArea(),
+                  child: _buildChatArea(),
                 ),
 
                 // Quick Questions (仅当消息很少时显示)
@@ -680,34 +565,39 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
             child: Column(
               crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                  decoration: BoxDecoration(
-                    gradient: isUser
-                        ? const LinearGradient(
-                            colors: [Color(0xFF2DD4BF), Color(0xFF14B8A6)],
-                          )
-                        : null,
-                    color: isUser ? null : Colors.white,
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(20),
-                      topRight: const Radius.circular(20),
-                      bottomLeft: Radius.circular(isUser ? 16 : 4),
-                      bottomRight: Radius.circular(isUser ? 4 : 16),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.06),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
+                GestureDetector(
+                  onLongPress: !isStreaming && message.content.isNotEmpty
+                      ? () => _copyMessage(message.content)
+                      : null,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                    decoration: BoxDecoration(
+                      gradient: isUser
+                          ? const LinearGradient(
+                              colors: [Color(0xFF2DD4BF), Color(0xFF14B8A6)],
+                            )
+                          : null,
+                      color: isUser ? null : Colors.white,
+                      borderRadius: BorderRadius.only(
+                        topLeft: const Radius.circular(20),
+                        topRight: const Radius.circular(20),
+                        bottomLeft: Radius.circular(isUser ? 16 : 4),
+                        bottomRight: Radius.circular(isUser ? 4 : 16),
                       ),
-                    ],
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.06),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: isEmptyAI && isStreaming
+                        ? _buildTypingAnimationInline()
+                        : (isStreaming && !isUser
+                            ? _buildStreamingContent(message.content)
+                            : _buildMessageContent(message.content, isUser)),
                   ),
-                  child: isEmptyAI && isStreaming
-                      ? _buildTypingAnimationInline()
-                      : (isStreaming && !isUser
-                          ? _buildStreamingContent(message.content)
-                          : _buildMessageContent(message.content, isUser)),
                 ),
                 // 健身计划预览
                 if (hasWorkoutPlan && chatProvider.pendingWorkoutPlan != null)
@@ -725,7 +615,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                           color: Colors.grey[400],
                         ),
                       ),
-                      if (!isUser && !isStreaming && message.content.isNotEmpty) ...[
+                      if (!isStreaming && message.content.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         GestureDetector(
                           onTap: () => _copyMessage(message.content),

@@ -17,7 +17,14 @@ class WorkoutProgressProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
 
   bool get hasProgress => _progress != null;
-  bool get isTodayCompleted => _progress?.status == WorkoutStatus.completed;
+  /// 今日是否已完成训练（需要状态为completed且有实际训练时长）
+  bool get isTodayCompleted {
+    if (_progress == null) return false;
+    if (_progress!.status != WorkoutStatus.completed) return false;
+    // 检查是否有实际训练时长（至少完成一个动作）
+    if (_progress!.completedExerciseIds.isEmpty) return false;
+    return true;
+  }
   bool get isInProgress => _progress?.status == WorkoutStatus.inProgress;
   bool get isNotStarted => _progress?.status == WorkoutStatus.notStarted;
 

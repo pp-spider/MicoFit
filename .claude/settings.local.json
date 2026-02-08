@@ -20,7 +20,8 @@
       "Bash(flutter build:*)",
       "Bash(flutter pub upgrade:*)",
       "Bash(flutter clean:*)",
-      "Bash(del \"d:\\\\FlutterProjects\\\\micofit\\\\lib\\\\widgets\\\\limitations_3d_viewer.dart\")"
+      "Bash(del \"d:\\\\FlutterProjects\\\\micofit\\\\lib\\\\widgets\\\\limitations_3d_viewer.dart\")",
+      "Bash(alembic current:*)"
     ]
   }
 }

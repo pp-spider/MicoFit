@@ -28,5 +28,14 @@ class User(Base):
     # 关联用户画像
     profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
+    # 关联训练计划
+    workout_plans = relationship("WorkoutPlan", back_populates="user", cascade="all, delete-orphan")
+
+    # 关联训练记录
+    workout_records = relationship("WorkoutRecord", back_populates="user", cascade="all, delete-orphan")
+
+    # 关联聊天会话
+    chat_sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
+
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email}, nickname={self.nickname})>"

@@ -64,6 +64,9 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+  # 应用图标生成工具
+  flutter_launcher_icons: ^0.14.3
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -78,7 +81,6 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/exercises/
-    - assets/models/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -105,3 +107,22 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# 应用图标配置
+# 运行 flutter pub get 安装依赖
+# 然后运行 flutter pub run flutter_launcher_icons:main 生成图标
+flutter_icons:
+  android: true
+  ios: true
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+  image_path: "assets/icon/app_icon.png"
+  # Android 自适应图标配置（可选）
+  # 如果需要，创建 assets/icon/app_icon_foreground.png 后取消注释
+  # adaptive_icon_background: "#2DD4BF"
+  # adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"

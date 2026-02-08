@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/user.dart';
 import '../models/auth_tokens.dart';
 import '../services/auth_api_service.dart';
+import '../utils/user_data_helper.dart';
 
 /// 认证状态管理
 class AuthProvider extends ChangeNotifier {
@@ -11,6 +12,7 @@ class AuthProvider extends ChangeNotifier {
   AuthTokens? _tokens;
   bool _isLoading = false;
   String? _errorMessage;
+  bool _isNewLogin = false; // 标记是否为新登录，用于数据刷新
 
   AuthProvider({AuthApiService? authService})
       : _authService = authService ?? AuthApiService();
@@ -21,6 +23,12 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   bool get isAuthenticated => _user != null && _tokens != null;
+  bool get isNewLogin => _isNewLogin;
+
+  /// 标记新登录状态为已处理
+  void markNewLoginHandled() {
+    _isNewLogin = false;
+  }
 
   /// 初始化：尝试自动登录
   Future<void> init() async {
@@ -41,6 +49,11 @@ class AuthProvider extends ChangeNotifier {
 
         // 获取用户信息
         _user = await _authService.getCurrentUser();
+
+        // 设置用户数据隔离的当前用户ID
+        if (_user != null) {
+          UserDataHelper.setCurrentUserId(_user!.id);
+        }
 
         // 读取存储的 Token 信息
         final accessToken = await _authService.getAccessToken();
@@ -83,6 +96,12 @@ class AuthProvider extends ChangeNotifier {
         nickname: nickname,
       );
       _user = await _authService.getCurrentUser();
+
+      // 设置用户数据隔离的当前用户ID
+      if (_user != null) {
+        UserDataHelper.setCurrentUserId(_user!.id);
+      }
+
       _errorMessage = null;
       return true;
     } catch (e) {
@@ -109,6 +128,13 @@ class AuthProvider extends ChangeNotifier {
         password: password,
       );
       _user = await _authService.getCurrentUser();
+
+      // 设置用户数据隔离的当前用户ID
+      if (_user != null) {
+        UserDataHelper.setCurrentUserId(_user!.id);
+      }
+
+      _isNewLogin = true; // 标记为新登录
       _errorMessage = null;
       return true;
     } catch (e) {
@@ -130,6 +156,8 @@ class AuthProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('登出错误: $e');
     } finally {
+      // 清除用户数据隔离的当前用户ID
+      UserDataHelper.clearCurrentUserId();
       _user = null;
       _tokens = null;
       _isLoading = false;

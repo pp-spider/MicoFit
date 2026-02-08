@@ -19,6 +19,11 @@ class ApiHttpClient {
     return await _storage.read(key: AppConfig.keyAccessToken);
   }
 
+  /// 公共方法：获取 Access Token（用于 SSE 流）
+  Future<String?> getToken() async {
+    return await _getAccessToken();
+  }
+
   /// 发送 GET 请求
   Future<http.Response> get(
     String path, {

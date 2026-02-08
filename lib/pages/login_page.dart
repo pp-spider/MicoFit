@@ -14,7 +14,6 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _nicknameController = TextEditingController();
 
   bool _isLogin = true;
   bool _obscurePassword = true;
@@ -24,59 +23,7 @@ class _LoginPageState extends State<LoginPage> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _nicknameController.dispose();
     super.dispose();
-  }
-
-  /// 显示成功提示弹窗
-  void _showSuccessDialog(String message) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => Center(
-        child: Container(
-          width: 200,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.check_circle_rounded,
-                size: 48,
-                color: Colors.green[600],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                message,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                  color: Color(0xFF115E59),
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    // 自动关闭弹窗
-    Future.delayed(const Duration(milliseconds: 1500), () {
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-    });
   }
 
   Future<void> _submit() async {
@@ -103,14 +50,20 @@ class _LoginPageState extends State<LoginPage> {
       success = await authProvider.register(
         email: _emailController.text.trim(),
         password: _passwordController.text,
-        nickname: _nicknameController.text.trim(),
+        nickname: '', // 昵称在后续个人信息填写中设置
       );
     }
 
     if (success && mounted) {
       // 注册成功显示提示
       if (!_isLogin) {
-        _showSuccessDialog('注册成功');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('注册成功'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 1),
+          ),
+        );
       }
       // 成功后 AuthProvider 会通知监听者，MainPage 会自动跳转
     } else if (!success && mounted) {
@@ -315,28 +268,6 @@ class _LoginPageState extends State<LoginPage> {
           },
         ),
 
-        // 昵称（仅注册时显示）
-        if (!_isLogin) ...[
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _nicknameController,
-            textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(
-              labelText: '昵称',
-              hintText: '请输入您的昵称',
-              prefixIcon: Icon(Icons.person_outline),
-            ),
-            validator: (value) {
-              if (value == null || value.isEmpty) {
-                return '请输入昵称';
-              }
-              if (value.length > 20) {
-                return '昵称不能超过20个字符';
-              }
-              return null;
-            },
-          ),
-        ],
       ],
     );
   }

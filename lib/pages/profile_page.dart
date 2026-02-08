@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_profile.dart';
 import '../widgets/bottom_nav.dart';
 
@@ -29,11 +28,6 @@ class _ProfilePageState extends State<ProfilePage> {
   late int _weeklyDays;
   late int _timeBudget;
 
-  // AI配置状态
-  final TextEditingController _baseUrlController = TextEditingController();
-  final TextEditingController _apiKeyController = TextEditingController();
-  final TextEditingController _modelController = TextEditingController();
-
   @override
   void initState() {
     super.initState();
@@ -44,36 +38,11 @@ class _ProfilePageState extends State<ProfilePage> {
       _weeklyDays = 3;
       _timeBudget = 12;
     }
-    _loadAiConfig();
   }
 
   @override
   void dispose() {
-    _baseUrlController.dispose();
-    _apiKeyController.dispose();
-    _modelController.dispose();
     super.dispose();
-  }
-
-  // 加载AI配置
-  Future<void> _loadAiConfig() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _baseUrlController.text = prefs.getString('ai_base_url') ?? '';
-      _apiKeyController.text = prefs.getString('ai_api_key') ?? '';
-      _modelController.text = prefs.getString('ai_model') ?? '';
-    });
-  }
-
-  // 保存AI配置
-  Future<void> _saveAiConfig() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('ai_base_url', _baseUrlController.text.trim());
-    await prefs.setString('ai_api_key', _apiKeyController.text.trim());
-    await prefs.setString('ai_model', _modelController.text.trim());
-    if (mounted) {
-      _showSuccessDialog('AI配置已保存');
-    }
   }
 
   // 显示成功提示弹窗
@@ -468,11 +437,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
                     const SizedBox(height: 24),
 
-                    // AI配置卡片
-                    _buildAiConfigCard(),
-
-                    const SizedBox(height: 16),
-
                     // Actions
                     _buildActionButton(
                       icon: Icons.edit,
@@ -771,139 +735,6 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildAiConfigCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF8B5CF6),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.smart_toy, color: Colors.white, size: 20),
-              ),
-              const SizedBox(width: 12),
-              const Text(
-                'AI配置',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF115E59),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          // Config Fields
-          _buildAiConfigField(
-            label: 'Base URL',
-            hint: 'https://api.openai.com',
-            controller: _baseUrlController,
-            icon: Icons.link,
-          ),
-          const SizedBox(height: 12),
-          _buildAiConfigField(
-            label: 'API Key',
-            hint: 'sk-...',
-            controller: _apiKeyController,
-            icon: Icons.key,
-            obscureText: true,
-          ),
-          const SizedBox(height: 12),
-          _buildAiConfigField(
-            label: 'Model',
-            hint: 'gpt-4o-mini',
-            controller: _modelController,
-            icon: Icons.psychology,
-          ),
-          const SizedBox(height: 16),
-          // Save Button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _saveAiConfig,
-              icon: const Icon(Icons.save, size: 18),
-              label: const Text('保存配置'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF8B5CF6),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAiConfigField({
-    required String label,
-    required String hint,
-    required TextEditingController controller,
-    required IconData icon,
-    bool obscureText = false,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF115E59),
-          ),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: controller,
-          obscureText: obscureText,
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
-            prefixIcon: Icon(icon, size: 20, color: const Color(0xFF8B5CF6)),
-            prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-            filled: true,
-            fillColor: const Color(0xFFF5F5F0),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF8B5CF6), width: 2),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          ),
-        ),
-      ],
     );
   }
 

@@ -1,14 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/user_profile.dart';
 import '../services/workout_local_service.dart';
 import '../services/user_api_service.dart';
+import '../utils/user_data_helper.dart';
 
-/// 用户画像状态管理
+/// 用户画像状态管理（用户数据隔离）
 class UserProfileProvider extends ChangeNotifier {
-  final SharedPreferences _prefs;
   final UserApiService _apiService;
 
   UserProfile? _profile;
@@ -16,10 +15,8 @@ class UserProfileProvider extends ChangeNotifier {
   String? _errorMessage;
 
   UserProfileProvider({
-    required SharedPreferences prefs,
     UserApiService? apiService,
-  })  : _prefs = prefs,
-        _apiService = apiService ?? UserApiService();
+  })  : _apiService = apiService ?? UserApiService();
 
   // Getters
   UserProfile? get profile => _profile;
@@ -43,7 +40,7 @@ class UserProfileProvider extends ChangeNotifier {
     } catch (e) {
       // 后端获取失败，尝试从本地加载
       debugPrint('从后端加载用户画像失败: $e，尝试从本地加载');
-      _loadFromLocal();
+      await _loadFromLocal();
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -51,8 +48,8 @@ class UserProfileProvider extends ChangeNotifier {
   }
 
   /// 从本地加载
-  void _loadFromLocal() {
-    final profileJson = _prefs.getString(AppConfig.keyUserProfile);
+  Future<void> _loadFromLocal() async {
+    final profileJson = await UserDataHelper.getString(AppConfig.keyUserProfile);
     if (profileJson != null) {
       try {
         final profileMap = jsonDecode(profileJson) as Map<String, dynamic>;
@@ -99,7 +96,7 @@ class UserProfileProvider extends ChangeNotifier {
 
   /// 保存到本地
   Future<void> _saveToLocal(UserProfile profile) async {
-    await _prefs.setString(AppConfig.keyUserProfile, jsonEncode(profile.toJson()));
+    await UserDataHelper.setString(AppConfig.keyUserProfile, jsonEncode(profile.toJson()));
   }
 
   /// 更新目标设置
@@ -178,9 +175,9 @@ class UserProfileProvider extends ChangeNotifier {
     }
   }
 
-  /// 清除用户画像
+  /// 清除用户画像（仅清除当前用户的）
   Future<void> clearProfile() async {
-    await _prefs.remove(AppConfig.keyUserProfile);
+    await UserDataHelper.remove(AppConfig.keyUserProfile);
     _profile = null;
     notifyListeners();
   }

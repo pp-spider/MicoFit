@@ -6,7 +6,7 @@ class RegisterRequest(BaseModel):
     """注册请求"""
     email: EmailStr = Field(..., description="邮箱地址")
     password: str = Field(..., min_length=6, max_length=50, description="密码")
-    nickname: str = Field(..., min_length=1, max_length=50, description="昵称")
+    nickname: str = Field(default="", max_length=50, description="昵称，可选，后续在个人信息中完善")
 
 
 class LoginRequest(BaseModel):

@@ -79,6 +79,11 @@ class _TodayPlanPageState extends State<TodayPlanPage> {
                         // Quick Stats - 使用真实数据
                         _buildQuickStats(monthlyStatsProvider.monthlyStats ?? MonthlyStats.createSample()),
 
+                        const SizedBox(height: 24),
+
+                        // AI生成计划提示模块
+                        _buildAIGeneratePrompt(),
+
                         const SizedBox(height: 100), // Space for bottom nav
                       ],
                     ),
@@ -252,6 +257,83 @@ class _TodayPlanPageState extends State<TodayPlanPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// AI生成计划提示模块
+  Widget _buildAIGeneratePrompt() {
+    return GestureDetector(
+      onTap: () => widget.onNavigate('ai'),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF2DD4BF),
+              Color(0xFF14B8A6),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF2DD4BF).withValues(alpha: 0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            // AI图标
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                Icons.auto_fix_high,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 16),
+            // 文字内容
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'AI定制训练',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '让AI根据你的状态生成专属计划',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.white.withValues(alpha: 0.9),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 箭头
+            Icon(
+              Icons.arrow_forward_ios,
+              color: Colors.white.withValues(alpha: 0.8),
+              size: 16,
+            ),
+          ],
+        ),
       ),
     );
   }

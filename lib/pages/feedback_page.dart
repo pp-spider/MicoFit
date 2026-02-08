@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/feedback.dart';
 import '../services/record_local_service.dart';
+import '../services/workout_api_service.dart';
 import '../constants/body_regions.dart';
 
 /// 训练反馈页面
@@ -57,7 +58,7 @@ class _FeedbackPageState extends State<FeedbackPage>
   bool get _allAnswered =>
       _completion != null && _feeling != null && _tomorrow != null;
 
-  void _handleSubmit() {
+  void _handleSubmit() async {
     if (!_allAnswered) return;
 
     // 保存反馈到本地
@@ -76,7 +77,22 @@ class _FeedbackPageState extends State<FeedbackPage>
         duration: widget.workoutDuration,
       );
     } catch (e) {
-      debugPrint('保存反馈失败: $e');
+      debugPrint('保存反馈到本地失败: $e');
+    }
+
+    // 同时提交反馈到后端
+    try {
+      final apiService = WorkoutApiService();
+      await apiService.submitFeedback(
+        duration: widget.workoutDuration,
+        completion: _completion!,
+        feeling: _feeling!,
+        tomorrow: _tomorrow!,
+        painLocations: _selectedPainLocations,
+      );
+    } catch (e) {
+      debugPrint('提交反馈到后端失败: $e');
+      // 后端失败不阻止UI继续，因为已经保存到本地
     }
 
     setState(() {

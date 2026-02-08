@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/workout_progress.dart';
@@ -23,6 +24,14 @@ class WorkoutProgressService {
 
       // 检查是否是今天的进度
       if (progress.isToday) {
+        // 检查completed状态的进度是否有效（至少完成一个动作）
+        if (progress.status == WorkoutStatus.completed &&
+            progress.completedExerciseIds.isEmpty) {
+          // 无效数据：completed状态但没有完成任何动作
+          debugPrint('[WorkoutProgressService] 发现无效进度数据，自动清除');
+          await clearProgress();
+          return null;
+        }
         return progress;
       }
 

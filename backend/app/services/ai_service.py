@@ -1,0 +1,368 @@
+"""AI服务层 - 封装LangGraph Agent调用"""
+import uuid
+from typing import AsyncGenerator
+from datetime import date
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+
+from app.agents.workout_agent import WorkoutAgent
+from app.agents.chat_agent import ChatAgent
+from app.services.workout_service import WorkoutService
+from app.services.chat_service import ChatService
+from app.services.user_service import UserService
+from app.services.context_service import ContextService
+from app.models.workout_plan import WorkoutPlan as WorkoutPlanModel
+
+
+class AIService:
+    """AI服务"""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.workout_agent = WorkoutAgent()
+        self.chat_agent = ChatAgent()
+        self.workout_service = WorkoutService(db)
+        self.chat_service = ChatService(db)
+        self.user_service = UserService(db)
+        self.context_service = ContextService(db)
+
+    async def stream_chat(
+        self,
+        user_id: str,
+        session_id: str | None,
+        message: str
+    ) -> AsyncGenerator[dict, None]:
+        """
+        流式聊天
+
+        Yields:
+            dict: SSE事件数据
+        """
+        # 获取或创建会话
+        is_new_session = False
+        if not session_id:
+            session = await self.chat_service.create_session(user_id, title=None)
+            session_id = session.id
+            is_new_session = True
+            yield {
+                "type": "session_created",
+                "session_id": session_id
+            }
+        else:
+            # 验证会话存在
+            session = await self.chat_service.get_session(session_id)
+            if not session or str(session.user_id) != user_id:
+                yield {
+                    "type": "error",
+                    "message": "会话不存在或无权访问"
+                }
+                return
+
+        # 获取用户画像
+        user_profile = await self.user_service.get_user_profile(user_id)
+        profile_dict = None
+        if user_profile:
+            profile_dict = {
+                "user_id": str(user_profile.user_id),
+                "nickname": user_profile.nickname,
+                "fitness_level": user_profile.fitness_level,
+                "goal": user_profile.goal,
+                "scene": user_profile.scene,
+                "time_budget": user_profile.time_budget,
+                "limitations": user_profile.limitations,
+                "equipment": user_profile.equipment,
+                "weekly_days": user_profile.weekly_days,
+            }
+
+        # 获取会话上下文（包含摘要和近期消息）
+        context = await self.context_service.get_context_for_chat(
+            session_id=session_id,
+            user_profile=profile_dict
+        )
+
+        # 获取历史消息（增加到20条）
+        history = await self.chat_service.get_session_messages(session_id, limit=30)
+        history_dicts = [
+            {"role": msg.role, "content": msg.content}
+            for msg in history
+        ]
+
+        # 获取用户跨会话记忆
+        user_memory = await self.context_service.get_user_memory(user_id, days=7)
+        recent_memories = user_memory.get("recent_topics", [])[:3]  # 取最近3个主题
+
+        # 保存用户消息
+        await self.chat_service.add_message(
+            session_id=session_id,
+            role="user",
+            content=message
+        )
+
+        # 如果是新会话，自动生成标题
+        if is_new_session:
+            await self.context_service.update_session_title_from_first_message(
+                session_id=session_id,
+                first_message=message
+            )
+
+        # 流式生成回复
+        full_content = ""
+        workout_plan = None
+
+        async for chunk in self.chat_agent.chat_stream(
+            user_id=user_id,
+            session_id=session_id,
+            user_message=message,
+            user_profile=profile_dict,
+            history=history_dicts,
+            context_summary=context.get("summary"),
+            recent_memories=recent_memories
+        ):
+            if chunk["type"] == "chunk":
+                full_content += chunk["content"]
+                yield chunk
+            elif chunk["type"] == "plan":
+                workout_plan = chunk["plan"]
+                # 保存计划到数据库
+                try:
+                    plan_record = await self.workout_service.create_plan(
+                        user_id=user_id,
+                        plan_date=date.today(),
+                        title=workout_plan["title"],
+                        subtitle=workout_plan.get("subtitle", ""),
+                        total_duration=workout_plan["total_duration"],
+                        scene=workout_plan["scene"],
+                        rpe=workout_plan["rpe"],
+                        modules=workout_plan["modules"],
+                        ai_note=workout_plan.get("ai_note"),
+                        is_applied=False
+                    )
+                    # 将数据库ID添加到计划数据中
+                    workout_plan["id"] = str(plan_record.id)
+                    yield {
+                        "type": "plan",
+                        "plan": workout_plan,
+                        "plan_id": str(plan_record.id)
+                    }
+                except Exception as e:
+                    # 保存失败时仍然返回原始计划，但不返回plan_id
+                    yield chunk
+            elif chunk["type"] == "done":
+                # 保存AI回复
+                await self.context_service.add_message_and_update_summary(
+                    session_id=session_id,
+                    role="assistant",
+                    content=full_content,
+                    structured_data=workout_plan,
+                    data_type="workout_plan" if workout_plan else "text"
+                )
+                yield {
+                    "type": "done",
+                    "session_id": session_id,
+                    "has_plan": workout_plan is not None
+                }
+            elif chunk["type"] == "error":
+                yield chunk
+
+    async def generate_workout_plan(
+        self,
+        user_id: str,
+        preferences: dict | None = None
+    ) -> dict:
+        """
+        生成训练计划（非流式）
+
+        Args:
+            user_id: 用户ID
+            preferences: 额外偏好设置
+
+        Returns:
+            dict: 包含生成的计划
+        """
+        # 获取用户画像
+        user_profile = await self.user_service.get_user_profile(user_id)
+        profile_dict = None
+        if user_profile:
+            profile_dict = {
+                "user_id": str(user_profile.user_id),
+                "nickname": user_profile.nickname,
+                "fitness_level": user_profile.fitness_level,
+                "goal": user_profile.goal,
+                "scene": user_profile.scene,
+                "time_budget": user_profile.time_budget,
+                "limitations": user_profile.limitations,
+                "equipment": user_profile.equipment,
+                "weekly_days": user_profile.weekly_days,
+            }
+
+        # 应用额外偏好
+        if preferences:
+            if "scene" in preferences:
+                profile_dict["scene"] = preferences["scene"]
+            if "time_budget" in preferences:
+                profile_dict["time_budget"] = preferences["time_budget"]
+            if "focus" in preferences:
+                # 可以在这里添加更多偏好处理
+                pass
+
+        # 生成计划
+        result = await self.workout_agent.generate_sync(user_id, profile_dict)
+
+        if result.get("success") and result.get("plan"):
+            # 保存到数据库
+            plan_data = result["plan"]
+            plan = await self.workout_service.create_plan(
+                user_id=user_id,
+                plan_date=date.today(),
+                title=plan_data["title"],
+                subtitle=plan_data.get("subtitle", ""),
+                total_duration=plan_data["total_duration"],
+                scene=plan_data["scene"],
+                rpe=plan_data["rpe"],
+                modules=plan_data["modules"],
+                ai_note=plan_data.get("ai_note"),
+                is_applied=False
+            )
+
+            return {
+                "success": True,
+                "plan": plan_data,
+                "plan_id": str(plan.id)
+            }
+
+        return {
+            "success": False,
+            "error": result.get("error", "生成计划失败")
+        }
+
+    async def stream_generate_workout_plan(
+        self,
+        user_id: str,
+        preferences: dict | None = None
+    ) -> AsyncGenerator[dict, None]:
+        """
+        流式生成训练计划
+
+        Yields:
+            dict: 包含流式数据和最终计划
+        """
+        # 获取用户画像
+        user_profile = await self.user_service.get_user_profile(user_id)
+        profile_dict = None
+        if user_profile:
+            profile_dict = {
+                "user_id": str(user_profile.user_id),
+                "nickname": user_profile.nickname,
+                "fitness_level": user_profile.fitness_level,
+                "goal": user_profile.goal,
+                "scene": user_profile.scene,
+                "time_budget": user_profile.time_budget,
+                "limitations": user_profile.limitations,
+                "equipment": user_profile.equipment,
+                "weekly_days": user_profile.weekly_days,
+            }
+
+        # 应用额外偏好
+        if preferences:
+            if "scene" in preferences:
+                profile_dict["scene"] = preferences["scene"]
+            if "time_budget" in preferences:
+                profile_dict["time_budget"] = preferences["time_budget"]
+
+        workout_plan = None
+
+        async for chunk in self.workout_agent.generate(user_id, profile_dict):
+            if chunk["type"] == "plan":
+                workout_plan = chunk["plan"]
+            yield chunk
+
+        # 保存计划到数据库
+        if workout_plan:
+            try:
+                plan = await self.workout_service.create_plan(
+                    user_id=user_id,
+                    plan_date=date.today(),
+                    title=workout_plan["title"],
+                    subtitle=workout_plan.get("subtitle", ""),
+                    total_duration=workout_plan["total_duration"],
+                    scene=workout_plan["scene"],
+                    rpe=workout_plan["rpe"],
+                    modules=workout_plan["modules"],
+                    ai_note=workout_plan.get("ai_note"),
+                    is_applied=False
+                )
+
+                yield {
+                    "type": "saved",
+                    "plan_id": str(plan.id)
+                }
+            except Exception as e:
+                yield {
+                    "type": "error",
+                    "message": f"保存计划失败: {str(e)}"
+                }
+
+    async def get_today_plan(self, user_id: str) -> dict | None:
+        """
+        获取今日计划（优先返回已应用的，否则返回最新生成的）
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            dict | None: 计划数据
+        """
+        # 先查询已应用的今日计划
+        result = await self.db.execute(
+            select(WorkoutPlanModel)
+            .where(
+                WorkoutPlanModel.user_id == user_id,
+                WorkoutPlanModel.plan_date == date.today(),
+                WorkoutPlanModel.is_applied == True
+            )
+        )
+        plan = result.scalar_one_or_none()
+
+        if plan:
+            return {
+                "id": str(plan.id),
+                "title": plan.title,
+                "subtitle": plan.subtitle,
+                "total_duration": plan.total_duration,
+                "scene": plan.scene,
+                "rpe": plan.rpe,
+                "modules": plan.modules,
+                "ai_note": plan.ai_note,
+                "is_completed": plan.is_completed,
+                "is_applied": plan.is_applied,
+                "plan_date": plan.plan_date.isoformat(),
+            }
+
+        # 如果没有已应用的，返回最新生成的
+        result = await self.db.execute(
+            select(WorkoutPlanModel)
+            .where(
+                WorkoutPlanModel.user_id == user_id,
+                WorkoutPlanModel.plan_date == date.today()
+            )
+            .order_by(desc(WorkoutPlanModel.created_at))
+            .limit(1)
+        )
+        plan = result.scalar_one_or_none()
+
+        if plan:
+            return {
+                "id": str(plan.id),
+                "title": plan.title,
+                "subtitle": plan.subtitle,
+                "total_duration": plan.total_duration,
+                "scene": plan.scene,
+                "rpe": plan.rpe,
+                "modules": plan.modules,
+                "ai_note": plan.ai_note,
+                "is_completed": plan.is_completed,
+                "is_applied": plan.is_applied,
+                "plan_date": plan.plan_date.isoformat(),
+            }
+
+        return None
