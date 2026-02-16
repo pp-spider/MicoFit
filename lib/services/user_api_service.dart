@@ -10,19 +10,26 @@ class UserApiService {
       : _httpClient = httpClient ?? ApiHttpClient();
 
   /// 获取用户画像
-  Future<UserProfile> getProfile() async {
-    final response = await _httpClient.get('/api/v1/profiles/');
+  /// 网络错误时返回 null，允许离线使用
+  Future<UserProfile?> getProfile() async {
+    try {
+      final response = await _httpClient.get('/api/v1/profiles/');
 
-    if (!ApiHttpClient.isSuccess(response)) {
-      throw Exception(ApiHttpClient.getErrorMessage(response));
+      if (!ApiHttpClient.isSuccess(response)) {
+        // API 返回错误（非网络错误），返回 null
+        return null;
+      }
+
+      final data = ApiHttpClient.parseResponse(response);
+      if (data == null) {
+        return null;
+      }
+
+      return UserProfile.fromJson(data);
+    } catch (e) {
+      // 网络错误，返回 null
+      return null;
     }
-
-    final data = ApiHttpClient.parseResponse(response);
-    if (data == null) {
-      throw Exception('获取用户画像失败：服务器响应无效');
-    }
-
-    return UserProfile.fromJson(data);
   }
 
   /// 创建用户画像

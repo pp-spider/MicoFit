@@ -9,7 +9,7 @@ from app.core.deps import get_current_user
 from app.models.user import User
 from app.services.ai_service import AIService
 from app.services.context_service import ContextService
-from app.schemas.chat import ChatStreamRequest, ChatStreamChunk
+from app.schemas.chat import ChatStreamRequest, ChatStreamChunk, ChatContinueRequest
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
@@ -37,6 +37,36 @@ async def chat_stream(
             user_id=str(current_user.id),
             session_id=request.session_id,
             message=request.message
+        ):
+            yield {
+                "event": chunk.get("type", "chunk"),
+                "data": json.dumps(chunk, ensure_ascii=False, default=str)
+            }
+
+    return EventSourceResponse(
+        event_generator(),
+        media_type="text/event-stream"
+    )
+
+
+@router.post("/chat/continue")
+async def chat_continue(
+    request: ChatContinueRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    继续之前的流式生成（SSE）
+
+    当应用从后台恢复时，调用此接口继续生成剩余内容
+    """
+    service = AIService(db)
+
+    async def event_generator():
+        async for chunk in service.continue_stream_chat(
+            user_id=str(current_user.id),
+            session_id=request.session_id,
+            existing_content=request.existing_content
         ):
             yield {
                 "event": chunk.get("type", "chunk"),
@@ -214,3 +244,44 @@ async def regenerate_session_summary(
         "summary": summary,
         "message_count": len(messages)
     }
+
+
+@router.get("/chat/messages")
+async def get_chat_messages(
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取用户的聊天消息（用于数据同步）
+
+    返回所有会话的消息列表
+    """
+    from app.services.chat_service import ChatService
+    from datetime import datetime
+
+    chat_service = ChatService(db)
+
+    # 获取用户的所有会话
+    sessions = await chat_service.get_user_sessions(str(current_user.id))
+
+    all_messages = []
+    for session in sessions:
+        messages = await chat_service.get_session_messages(session.id, limit=limit)
+        for msg in messages:
+            all_messages.append({
+                "id": str(msg.id),
+                "session_id": str(msg.session_id),
+                "role": msg.role,
+                "content": msg.content,
+                "data_type": msg.data_type,
+                "structured_data": msg.structured_data,
+                "tool_calls": msg.tool_calls,
+                "tool_call_id": msg.tool_call_id,
+                "created_at": msg.created_at.isoformat() if msg.created_at else None,
+            })
+
+    # 按时间排序
+    all_messages.sort(key=lambda x: x["created_at"] or "")
+
+    return {"messages": all_messages}

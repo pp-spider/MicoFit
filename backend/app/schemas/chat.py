@@ -33,6 +33,12 @@ class ChatStreamRequest(BaseModel):
     message: str = Field(..., description="用户消息")
 
 
+class ChatContinueRequest(BaseModel):
+    """继续流式生成请求"""
+    session_id: str = Field(..., description="会话ID")
+    existing_content: str = Field(..., description="已有的内容（前端已接收的部分）")
+
+
 class ChatStreamChunk(BaseModel):
     """流式聊天响应块"""
     type: str = Field(..., description="类型：chunk/plan/done/error/session_created/saved")

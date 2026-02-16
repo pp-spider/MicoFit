@@ -15,28 +15,24 @@ class WorkoutRecord {
   });
 
   factory WorkoutRecord.fromJson(Map<String, dynamic> json) {
-    // 兼容旧数据，如果没有 painLocations 字段则使用空数组
-    final feedbackData = json['feedback'] as Map<String, dynamic>?;
-
+    // 兼容后端返回的扁平格式
     return WorkoutRecord(
-      date: DateTime.parse(json['date'] as String),
+      date: DateTime.parse(json['date'] as String? ?? json['record_date'] as String),
       duration: json['duration'] as int,
       feedback: WorkoutFeedback(
         completion: CompletionLevel.values.firstWhere(
-          (e) => e.name == feedbackData?['completion'],
+          (e) => e.name == (json['completion'] as String? ?? json['feedback']?['completion'] as String?),
           orElse: () => CompletionLevel.smooth,
         ),
         feeling: FeelingLevel.values.firstWhere(
-          (e) => e.name == feedbackData?['feeling'],
+          (e) => e.name == (json['feeling'] as String? ?? json['feedback']?['feeling'] as String?),
           orElse: () => FeelingLevel.justRight,
         ),
         tomorrow: TomorrowPreference.values.firstWhere(
-          (e) => e.name == feedbackData?['tomorrow'],
+          (e) => e.name == (json['tomorrow'] as String? ?? json['feedback']?['tomorrow'] as String?),
           orElse: () => TomorrowPreference.maintain,
         ),
-        painLocations: feedbackData?['painLocations'] != null
-            ? List<String>.from(feedbackData!['painLocations'] as List)
-            : const [],
+        painLocations: (json['pain_locations'] as List? ?? json['feedback']?['painLocations'] as List?)?.cast<String>() ?? [],
       ),
       completed: json['completed'] as bool? ?? true,
     );

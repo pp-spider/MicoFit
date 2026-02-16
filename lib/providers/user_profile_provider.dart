@@ -33,13 +33,16 @@ class UserProfileProvider extends ChangeNotifier {
     try {
       // 尝试从后端获取用户画像
       final serverProfile = await _apiService.getProfile();
-      _profile = serverProfile;
-      // 同步到本地
-      await _saveToLocal(_profile!);
-      debugPrint('从后端加载用户画像成功');
+      if (serverProfile != null) {
+        _profile = serverProfile;
+        // 同步到本地
+        await _saveToLocal(_profile!);
+      } else {
+        // 后端返回 null（可能是网络错误），从本地加载
+        await _loadFromLocal();
+      }
     } catch (e) {
       // 后端获取失败，尝试从本地加载
-      debugPrint('从后端加载用户画像失败: $e，尝试从本地加载');
       await _loadFromLocal();
     } finally {
       _isLoading = false;
@@ -137,12 +140,15 @@ class UserProfileProvider extends ChangeNotifier {
 
     try {
       final serverProfile = await _apiService.getProfile();
-      _profile = serverProfile;
-      await _saveToLocal(_profile!);
-      debugPrint('从后端获取用户画像成功');
-      return true;
+      if (serverProfile != null) {
+        _profile = serverProfile;
+        await _saveToLocal(_profile!);
+        return true;
+      } else {
+        _errorMessage = '无法从服务器获取用户画像';
+        return false;
+      }
     } catch (e) {
-      debugPrint('从后端获取用户画像失败: $e');
       _errorMessage = '获取用户画像失败: $e';
       return false;
     } finally {

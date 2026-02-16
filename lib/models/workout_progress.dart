@@ -74,27 +74,40 @@ class WorkoutProgress {
     );
   }
 
-  /// 从 JSON 解析
+  /// 从 JSON 解析（支持 camelCase 和 snake_case 两种格式）
   factory WorkoutProgress.fromJson(Map<String, dynamic> json) {
+    // 兼容后端返回的 snake_case 字段名
+    String? getString(String camelKey, String snakeKey) {
+      return json[camelKey] as String? ?? json[snakeKey] as String?;
+    }
+
+    int? getInt(String camelKey, String snakeKey) {
+      return json[camelKey] as int? ?? json[snakeKey] as int?;
+    }
+
+    List<String> getStringList(String camelKey, String snakeKey) {
+      final list = json[camelKey] as List? ?? json[snakeKey] as List?;
+      return list?.cast<String>() ?? [];
+    }
+
     return WorkoutProgress(
-      dateKey: json['dateKey'] as String,
-      planId: json['planId'] as String,
+      dateKey: getString('dateKey', 'date_key') ?? '',
+      planId: getString('planId', 'plan_id') ?? '',
       status: WorkoutStatus.values.firstWhere(
         (e) => e.name == json['status'],
         orElse: () => WorkoutStatus.notStarted,
       ),
-      currentModuleIndex: json['currentModuleIndex'] as int? ?? 0,
-      currentExerciseIndex: json['currentExerciseIndex'] as int? ?? 0,
-      totalExercises: json['totalExercises'] as int,
-      completedExerciseIds:
-          (json['completedExerciseIds'] as List?)?.cast<String>() ?? [],
-      startTime: DateTime.parse(json['startTime'] as String),
-      lastUpdateTime: DateTime.parse(json['lastUpdateTime'] as String),
-      actualDuration: json['actualDuration'] as int? ?? 0,
+      currentModuleIndex: getInt('currentModuleIndex', 'current_module_index') ?? 0,
+      currentExerciseIndex: getInt('currentExerciseIndex', 'current_exercise_index') ?? 0,
+      totalExercises: getInt('totalExercises', 'total_exercises') ?? 0,
+      completedExerciseIds: getStringList('completedExerciseIds', 'completed_exercise_ids'),
+      startTime: DateTime.parse(getString('startTime', 'start_time') ?? DateTime.now().toIso8601String()),
+      lastUpdateTime: DateTime.parse(getString('lastUpdateTime', 'last_update_time') ?? DateTime.now().toIso8601String()),
+      actualDuration: getInt('actualDuration', 'actual_duration') ?? 0,
     );
   }
 
-  /// 转换为 JSON
+  /// 转换为 JSON（camelCase 格式，用于本地存储）
   Map<String, dynamic> toJson() {
     return {
       'dateKey': dateKey,
@@ -107,6 +120,22 @@ class WorkoutProgress {
       'startTime': startTime.toIso8601String(),
       'lastUpdateTime': lastUpdateTime.toIso8601String(),
       'actualDuration': actualDuration,
+    };
+  }
+
+  /// 转换为后端 JSON（snake_case 格式，用于 API 请求）
+  Map<String, dynamic> toBackendJson() {
+    return {
+      'date_key': dateKey,
+      'plan_id': planId,
+      'status': status.name,
+      'current_module_index': currentModuleIndex,
+      'current_exercise_index': currentExerciseIndex,
+      'total_exercises': totalExercises,
+      'completed_exercise_ids': completedExerciseIds,
+      'start_time': startTime.toIso8601String(),
+      'last_update_time': lastUpdateTime.toIso8601String(),
+      'actual_duration': actualDuration,
     };
   }
 

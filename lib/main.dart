@@ -20,6 +20,7 @@ import 'providers/monthly_stats_provider.dart';
 import 'providers/workout_progress_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/auth_provider.dart';
+import 'providers/sync_provider.dart';
 import 'utils/user_id_generator.dart';
 import 'utils/user_data_helper.dart';
 import 'models/workout_progress.dart';
@@ -58,6 +59,10 @@ void main() async {
         ),
         ChangeNotifierProvider(
           create: (_) => ChatProvider(), // 不在此处加载历史，等登录后再加载
+        ),
+        // 同步状态 Provider
+        ChangeNotifierProvider(
+          create: (_) => SyncProvider()..init(),
         ),
       ],
       child: const MicoFitApp(),
@@ -255,14 +260,19 @@ class _MainPageState extends State<MainPage> {
     }
 
     // 确保用户ID已设置（用户数据隔离）
-    final userId = authProvider.user?.id;
+    // 优先使用 authProvider.user?.id，离线模式下使用本地缓存
+    String? userId = authProvider.user?.id;
+    if (userId == null || userId.isEmpty) {
+      userId = await UserDataHelper.getCurrentUserId();
+    }
+
     if (userId != null && userId.isNotEmpty) {
       // 如果内存中已有数据，先清除（防止用户切换时看到旧数据）
       if (chatProvider.messages.isNotEmpty) {
         chatProvider.clearMemoryData();
       }
       UserDataHelper.setCurrentUserId(userId);
-      debugPrint('[MainPage] 已设置当前用户ID: $userId');
+      debugPrint('[MainPage] 已设置当前用户ID: $userId (${authProvider.isOfflineMode ? "离线" : "在线"})');
     }
 
     // 已登录，初始化并检查用户画像
@@ -830,9 +840,6 @@ class _MainPageState extends State<MainPage> {
               workoutPlan: workoutProvider.todayWorkout!,
               onStartWorkout: _startWorkout,
               onNavigate: _navigateTo,
-              onRefresh: () {
-                workoutProvider.refreshWorkout();
-              },
             );
           },
         );

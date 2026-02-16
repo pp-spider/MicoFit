@@ -7,7 +7,7 @@ from sqlalchemy import text
 import logging
 
 from app.core.config import settings
-from app.api.v1 import auth, profiles, users, ai, workouts, feedback
+from app.api.v1 import auth, profiles, users, ai, workouts, feedback, sync, chat_sessions
 from app.db.base import Base
 
 logger = logging.getLogger(__name__)
@@ -99,6 +99,8 @@ app.include_router(users.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(workouts.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
+app.include_router(sync.router, prefix="/api/v1")
+app.include_router(chat_sessions.router, prefix="/api/v1")
 
 
 @app.get("/")

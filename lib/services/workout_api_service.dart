@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import '../models/workout.dart';
 import '../models/feedback.dart';
+import '../models/workout_progress.dart';
 import 'http_client.dart';
 
 /// 训练计划 API 服务
@@ -11,21 +13,37 @@ class WorkoutApiService {
       : _httpClient = httpClient ?? ApiHttpClient();
 
   /// 获取今日训练计划
-  Future<WorkoutPlan?> getTodayPlan() async {
-    final response = await _httpClient.get('/api/v1/workouts/today');
+  /// [date] 可选，指定日期，格式为 yyyy-MM-dd，默认为今日
+  Future<WorkoutPlan?> getTodayPlan({DateTime? date}) async {
+    try {
+      final targetDate = date ?? DateTime.now();
+      final dateStr =
+          '${targetDate.year}-${targetDate.month.toString().padLeft(2, '0')}-${targetDate.day.toString().padLeft(2, '0')}';
 
-    if (response.statusCode == 404) {
+      final response = await _httpClient.get(
+        '/api/v1/workouts/today',
+        queryParams: {'plan_date': dateStr},
+      );
+
+      if (response.statusCode == 404) {
+        return null;
+      }
+
+      if (!ApiHttpClient.isSuccess(response)) {
+        // API 返回错误（非网络错误），返回 null 让前端使用本地数据
+        debugPrint('获取今日计划API错误: ${response.statusCode}');
+        return null;
+      }
+
+      final data = ApiHttpClient.parseResponse(response);
+      if (data == null) return null;
+
+      return WorkoutPlan.fromJson(data);
+    } catch (e) {
+      // 网络错误，返回 null 让前端使用本地数据
+      debugPrint('获取今日计划网络错误: $e');
       return null;
     }
-
-    if (!ApiHttpClient.isSuccess(response)) {
-      throw Exception(ApiHttpClient.getErrorMessage(response));
-    }
-
-    final data = ApiHttpClient.parseResponse(response);
-    if (data == null) return null;
-
-    return WorkoutPlan.fromJson(data);
   }
 
   /// 应用训练计划到今日
@@ -198,5 +216,113 @@ class WorkoutApiService {
     }
 
     return ApiHttpClient.parseResponse(response);
+  }
+
+  // ========== 训练进度 API ==========
+
+  /// 获取今日训练进度
+  Future<WorkoutProgress?> getTodayProgress() async {
+    try {
+      final response = await _httpClient.get('/api/v1/workouts/progress/today');
+
+      if (response.statusCode == 404 || response.statusCode == 204) {
+        return null;
+      }
+
+      if (!ApiHttpClient.isSuccess(response)) {
+        debugPrint('获取今日进度API错误: ${response.statusCode}');
+        return null;
+      }
+
+      final data = ApiHttpClient.parseResponse(response);
+      if (data == null) return null;
+
+      return WorkoutProgress.fromJson(data);
+    } catch (e) {
+      debugPrint('获取今日进度网络错误: $e');
+      return null;
+    }
+  }
+
+  /// 创建训练进度
+  Future<WorkoutProgress?> createProgress({
+    required String planId,
+    required int totalExercises,
+  }) async {
+    try {
+      final response = await _httpClient.post(
+        '/api/v1/workouts/progress',
+        body: jsonEncode({
+          'plan_id': planId,
+          'total_exercises': totalExercises,
+        }),
+      );
+
+      if (!ApiHttpClient.isSuccess(response)) {
+        debugPrint('创建进度API错误: ${response.statusCode}');
+        return null;
+      }
+
+      final data = ApiHttpClient.parseResponse(response);
+      if (data == null || data['progress'] == null) return null;
+
+      return WorkoutProgress.fromJson(data['progress'] as Map<String, dynamic>);
+    } catch (e) {
+      debugPrint('创建进度网络错误: $e');
+      return null;
+    }
+  }
+
+  /// 更新训练进度
+  Future<WorkoutProgress?> updateProgress({
+    String? status,
+    int? currentModuleIndex,
+    int? currentExerciseIndex,
+    List<String>? completedExerciseIds,
+    int? actualDuration,
+  }) async {
+    try {
+      final body = <String, dynamic>{};
+      if (status != null) body['status'] = status;
+      if (currentModuleIndex != null) body['current_module_index'] = currentModuleIndex;
+      if (currentExerciseIndex != null) body['current_exercise_index'] = currentExerciseIndex;
+      if (completedExerciseIds != null) body['completed_exercise_ids'] = completedExerciseIds;
+      if (actualDuration != null) body['actual_duration'] = actualDuration;
+
+      final response = await _httpClient.put(
+        '/api/v1/workouts/progress',
+        body: jsonEncode(body),
+      );
+
+      if (!ApiHttpClient.isSuccess(response)) {
+        debugPrint('更新进度API错误: ${response.statusCode}');
+        return null;
+      }
+
+      final data = ApiHttpClient.parseResponse(response);
+      if (data == null || data['progress'] == null) return null;
+
+      return WorkoutProgress.fromJson(data['progress'] as Map<String, dynamic>);
+    } catch (e) {
+      debugPrint('更新进度网络错误: $e');
+      return null;
+    }
+  }
+
+  /// 清除今日训练进度
+  Future<bool> clearProgress() async {
+    try {
+      final response = await _httpClient.delete('/api/v1/workouts/progress');
+
+      if (!ApiHttpClient.isSuccess(response)) {
+        debugPrint('清除进度API错误: ${response.statusCode}');
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('清除进度网络错误: $e');
+      return false;
+    }
   }
 }

@@ -6,6 +6,7 @@ import '../models/exercise.dart';
 import '../models/workout.dart';
 import '../widgets/bottom_nav.dart';
 import '../providers/chat_provider.dart';
+import 'chat_sessions_page.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
@@ -20,6 +21,21 @@ class AiChatPage extends StatefulWidget {
 
   @override
   State<AiChatPage> createState() => _AiChatPageState();
+}
+
+/// 快捷提示数据类
+class _QuickPrompt {
+  final IconData icon;
+  final String title;
+  final String desc;
+  final Color color;
+
+  _QuickPrompt({
+    required this.icon,
+    required this.title,
+    required this.desc,
+    required this.color,
+  });
 }
 
 class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
@@ -225,93 +241,6 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     });
   }
 
-  /// 显示清空聊天记录确认对话框
-  void _showClearChatDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => Center(
-        child: Container(
-          width: 280,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.delete_outline_rounded,
-                size: 48,
-                color: Colors.red[400],
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                '清空聊天记录',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF115E59),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '确定要清空所有聊天记录吗？\n此操作无法撤销',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey[600],
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('取消'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        Navigator.pop(context);
-                        await context.read<ChatProvider>().clearHistory();
-                        _scrollToBottom();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red[400],
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('清空'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   /// 复制消息到剪贴板
   Future<void> _copyMessage(String content) async {
     await Clipboard.setData(ClipboardData(text: content));
@@ -364,6 +293,8 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
           SafeArea(
             child: Column(
               children: [
+                // 顶部标题栏
+                _buildHeader(),
                 // Messages List
                 Expanded(
                   child: _buildChatArea(),
@@ -383,6 +314,68 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
       bottomNavigationBar: BottomNav(
         currentPage: 'ai',
         onNavigate: widget.onNavigate,
+      ),
+    );
+  }
+
+  /// 顶部标题栏（包含会话管理入口）
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Row(
+        children: [
+          // 菜单按钮（会话列表）
+          IconButton(
+            icon: const Icon(Icons.menu, color: Color(0xFF115E59)),
+            onPressed: () => _openSessionList(context),
+            tooltip: '对话历史',
+          ),
+          // 标题
+          Expanded(
+            child: Consumer<ChatProvider>(
+              builder: (context, provider, _) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'AI 教练',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF115E59),
+                      ),
+                    ),
+                    if (provider.currentSessionId != null)
+                      Text(
+                        '当前对话',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+          // 新建对话按钮
+          IconButton(
+            icon: const Icon(Icons.add, color: Color(0xFF115E59)),
+            onPressed: () async {
+              await context.read<ChatProvider>().createNewSession();
+            },
+            tooltip: '新建对话',
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 打开会话列表
+  void _openSessionList(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const ChatSessionsPage(),
       ),
     );
   }
@@ -468,55 +461,208 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
       child: Consumer<ChatProvider>(
         builder: (context, chatProvider, child) {
           final messages = chatProvider.messages;
-          if (messages.isEmpty) return _buildEmptyState();
-          return _buildMessagesList(messages, chatProvider);
+          // 没有选择会话时显示空状态
+          if (chatProvider.currentSessionId == null) return _buildEmptyState();
+          // 有消息时显示消息列表
+          if (messages.isNotEmpty) return _buildMessagesList(messages, chatProvider);
+          // 选择了会话但没有消息时显示空状态
+          return _buildEmptyState();
         },
       ),
     );
   }
 
-  /// 空状态
+  /// 空状态（DeepSeek/Kimi风格 - 未选中任何会话）
   Widget _buildEmptyState() {
-    return Center(
+    return SingleChildScrollView(
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            width: 100,
-            height: 100,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  const Color(0xFF2DD4BF).withValues(alpha: 0.25),
-                  const Color(0xFF14B8A6).withValues(alpha: 0.2),
-                ],
-              ),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.chat_bubble_outline_rounded,
-              size: 48,
-              color: Color(0xFF2DD4BF),
-            ),
-          ),
+          // 品牌展示区
+          const SizedBox(height: 80),
+          _buildBrandHero(),
+          const SizedBox(height: 32),
+          // 快捷提示网格
+          _buildQuickPromptsGrid(),
           const SizedBox(height: 24),
-          Text(
-            '开始对话',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[800],
+        ],
+      ),
+    );
+  }
+
+  /// 品牌展示区（Hero Section）
+  Widget _buildBrandHero() {
+    return Column(
+      children: [
+        // 大Logo
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF2DD4BF), Color(0xFF14B8A6)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF2DD4BF).withValues(alpha: 0.3),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
+          child: const Icon(
+            Icons.fitness_center,
+            size: 36,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 20),
+        // Slogan
+        const Text(
+          '你的AI健身教练',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF115E59),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '随时随地，享受碎片化训练',
+          style: TextStyle(
+            fontSize: 15,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 快捷提示网格（类似Kimi/DeepSeek）
+  Widget _buildQuickPromptsGrid() {
+    // 定义快捷提示卡片数据
+    final prompts = [
+      _QuickPrompt(
+        icon: Icons.calendar_today,
+        title: '今日训练',
+        desc: '生成今天的训练计划',
+        color: const Color(0xFF10B981),
+      ),
+      _QuickPrompt(
+        icon: Icons.local_fire_department,
+        title: '减脂建议',
+        desc: '获取科学的减脂方案',
+        color: const Color(0xFFF59E0B),
+      ),
+      _QuickPrompt(
+        icon: Icons.fitness_center,
+        title: '增肌训练',
+        desc: '制定增肌计划',
+        color: const Color(0xFFEF4444),
+      ),
+      _QuickPrompt(
+        icon: Icons.self_improvement,
+        title: '拉伸放松',
+        desc: '缓解肌肉酸痛',
+        color: const Color(0xFF8B5CF6),
+      ),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Text(
-            '选择下方快捷问题或直接输入',
+            '可以这样问我',
             style: TextStyle(
               fontSize: 14,
-              color: Colors.grey[500],
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[600],
             ),
           ),
+          const SizedBox(height: 12),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1.6,
+            ),
+            itemCount: prompts.length,
+            itemBuilder: (context, index) {
+              final prompt = prompts[index];
+              return _buildPromptCard(prompt);
+            },
+          ),
         ],
+      ),
+    );
+  }
+
+  /// 快捷提示卡片
+  Widget _buildPromptCard(_QuickPrompt prompt) {
+    return GestureDetector(
+      onTap: () => _sendQuickQuestion(prompt.desc),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: prompt.color.withValues(alpha: 0.2),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: prompt.color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                prompt.icon,
+                size: 18,
+                color: prompt.color,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              prompt.title,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1F2937),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              prompt.desc,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[500],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1313,17 +1459,6 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                           horizontal: 20,
                           vertical: 12,
                         ),
-                        suffixIcon: chatProvider.messages.isNotEmpty
-                            ? IconButton(
-                                icon: Icon(
-                                  Icons.clear_all_rounded,
-                                  color: Colors.grey[400],
-                                  size: 20,
-                                ),
-                                onPressed: () => _showClearChatDialog(),
-                                tooltip: '清空聊天记录',
-                              )
-                            : null,
                       ),
                       onSubmitted: (_) => _sendMessage(),
                     ),

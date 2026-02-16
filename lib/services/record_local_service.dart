@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import '../config/app_config.dart';
 import '../models/workout_record.dart';
 import '../models/weekly_data.dart';
 import '../models/feedback.dart';
 import '../utils/user_data_helper.dart';
+import 'offline_queue_service.dart';
 
 /// 本地记录服务 - 负责训练记录的保存和查询（用户数据隔离）
 class RecordLocalService {
@@ -12,6 +14,7 @@ class RecordLocalService {
     required DateTime date,
     required WorkoutFeedback feedback,
     required int duration,
+    bool syncToBackend = true,
   }) async {
     // 加载现有记录
     final recordsJson = await UserDataHelper.getString(AppConfig.keyWorkoutRecords);
@@ -33,6 +36,12 @@ class RecordLocalService {
       AppConfig.keyWorkoutRecords,
       jsonEncode(recordsList),
     );
+
+    // 如果需要同步，添加到离线队列
+    if (syncToBackend) {
+      final recordData = newRecord.toJson();
+      await OfflineQueueService().addFeedback(recordData);
+    }
   }
 
   /// 加载所有训练记录
@@ -55,11 +64,15 @@ class RecordLocalService {
   Future<MonthlyStats> getMonthlyStats(int year, int month) async {
     final records = await _loadAllRecords();
 
-    // 筛选当月记录
+    debugPrint('[RecordLocalService] 加载到 ${records.length} 条训练记录');
+
+    // 筛选当月记录（使用本地时区的日期进行比较）
     final monthlyRecords = records.where((record) {
-      final d = record.date;
-      return d.year == year && d.month == month;
+      final localDate = record.date.toLocal();
+      return localDate.year == year && localDate.month == month;
     }).toList();
+
+    debugPrint('[RecordLocalService] $year年$month月有 ${monthlyRecords.length} 条记录');
 
     // 生成每日记录
     final daysInMonth = DateTime(year, month + 1, 0).day;
@@ -67,10 +80,11 @@ class RecordLocalService {
     int totalMinutes = 0;
     int completedDays = 0;
 
-    // 按日期聚合记录
+    // 按日期聚合记录（使用本地日期）
     final Map<int, List<WorkoutRecord>> recordsByDay = {};
     for (final record in monthlyRecords) {
-      final day = record.date.day;
+      final localDate = record.date.toLocal();
+      final day = localDate.day;
       recordsByDay.putIfAbsent(day, () => []).add(record);
     }
 
@@ -146,5 +160,48 @@ class RecordLocalService {
   /// 清除所有记录
   Future<void> clearAllRecords() async {
     await UserDataHelper.remove(AppConfig.keyWorkoutRecords);
+  }
+
+  /// 保存从后端拉取的月度统计数据
+  /// 将后端数据转换为训练记录并保存到本地
+  Future<void> saveFromBackend(Map<String, dynamic> backendStats) async {
+    final records = backendStats['records'] as List<dynamic>? ?? [];
+
+    // 加载现有记录
+    final recordsJson = await UserDataHelper.getString(AppConfig.keyWorkoutRecords);
+    final List<dynamic> localRecords =
+        recordsJson != null ? jsonDecode(recordsJson) as List : [];
+
+    // 合并后端记录
+    for (final record in records) {
+      try {
+        final recordData = record as Map<String, dynamic>;
+        // 检查是否已存在（按日期判断）
+        final recordDate = recordData['date'] as String?;
+        if (recordDate == null) continue;
+
+        // 检查本地是否已存在
+        final existingIndex = localRecords.indexWhere((r) {
+          final rDate = r['date'] as String?;
+          return rDate == recordDate;
+        });
+
+        if (existingIndex == -1) {
+          // 不存在，添加
+          localRecords.add(recordData);
+        }
+        // 已存在则保留本地数据（本地优先）
+      } catch (e) {
+        debugPrint('[RecordLocalService] 解析后端记录失败: $e');
+      }
+    }
+
+    // 保存合并后的数据
+    await UserDataHelper.setString(
+      AppConfig.keyWorkoutRecords,
+      jsonEncode(localRecords),
+    );
+
+    debugPrint('[RecordLocalService] 保存了 ${localRecords.length} 条训练记录（含后端数据）');
   }
 }

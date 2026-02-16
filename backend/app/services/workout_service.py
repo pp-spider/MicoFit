@@ -3,7 +3,7 @@ import uuid
 from datetime import date, timedelta
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc
+from sqlalchemy import select, and_, desc, update
 
 from app.models.workout_plan import WorkoutPlan, WorkoutRecord
 
@@ -155,7 +155,7 @@ class WorkoutService:
 
         # 取消其他今日计划的已应用状态
         await self.db.execute(
-            select(WorkoutPlan)
+            update(WorkoutPlan)
             .where(
                 and_(
                     WorkoutPlan.user_id == user_id,
@@ -164,6 +164,7 @@ class WorkoutService:
                     WorkoutPlan.is_applied == True
                 )
             )
+            .values(is_applied=False)
         )
 
         # 标记当前计划为已应用
@@ -333,3 +334,115 @@ class WorkoutService:
         """获取昨天的反馈"""
         yesterday = date.today() - timedelta(days=1)
         return await self.get_record_by_date(user_id, yesterday)
+
+    async def get_user_records(
+        self,
+        user_id: str,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        limit: int = 100
+    ) -> List[WorkoutRecord]:
+        """获取用户的所有训练记录"""
+        query = select(WorkoutRecord).where(WorkoutRecord.user_id == user_id)
+
+        if start_date:
+            query = query.where(WorkoutRecord.record_date >= start_date)
+        if end_date:
+            query = query.where(WorkoutRecord.record_date <= end_date)
+
+        query = query.order_by(desc(WorkoutRecord.record_date)).limit(limit)
+
+        result = await self.db.execute(query)
+        return result.scalars().all()
+
+    async def get_user_records_for_sync(
+        self,
+        user_id: str,
+        start_date: date | None = None,
+        end_date: date | None = None
+    ) -> List[dict]:
+        """获取用户记录用于同步（返回字典列表）"""
+        records = await self.get_user_records(user_id, start_date, end_date)
+
+        return [
+            {
+                "id": str(r.id),
+                "user_id": r.user_id,
+                "plan_id": r.plan_id,
+                "record_date": r.record_date.isoformat() if r.record_date else None,
+                "duration": r.duration,
+                "completion": r.completion,
+                "feeling": r.feeling,
+                "tomorrow": r.tomorrow,
+                "pain_locations": r.pain_locations or [],
+                "completed": r.completed,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in records
+        ]
+
+    async def get_monthly_stats(
+        self,
+        user_id: str,
+        year: int,
+        month: int
+    ) -> dict:
+        """获取月度统计数据"""
+        from calendar import monthrange
+
+        # 计算月份范围
+        _, days_in_month = monthrange(year, month)
+        start_date = date(year, month, 1)
+        end_date = date(year, month, days_in_month)
+
+        # 获取该月的所有记录
+        records = await self.get_user_records(
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        # 计算统计数据
+        total_minutes = sum(r.duration for r in records if r.completed)
+        completed_days = len([r for r in records if r.completed])
+
+        # 生成每日记录
+        day_records = []
+        for day in range(1, days_in_month + 1):
+            record_date = date(year, month, day)
+            day_of_week = record_date.weekday() % 7
+
+            # 查找当天的记录
+            day_record = next(
+                (r for r in records if r.record_date == record_date),
+                None
+            )
+
+            if day_record and day_record.completed:
+                status = "completed"
+                duration = day_record.duration
+            elif record_date == date.today():
+                status = "planned"
+                duration = 0
+            elif record_date < date.today():
+                status = "none"
+                duration = 0
+            else:
+                status = "none"
+                duration = 0
+
+            day_records.append({
+                "date": record_date.isoformat(),
+                "dayOfWeek": day_of_week,
+                "duration": duration,
+                "status": status
+            })
+
+        return {
+            "year": year,
+            "month": month,
+            "total_minutes": total_minutes,
+            "target_minutes": 300,  # 默认目标，可以从用户画像获取
+            "completed_days": completed_days,
+            "records": day_records
+        }

@@ -260,39 +260,134 @@ class ContextService:
         first_message: str
     ) -> str:
         """
-        基于第一条消息自动生成会话标题
+        基于第一条消息自动生成会话标题（类似 DeepSeek/Kimi 的智能命名）
         """
-        # 如果消息很短，直接使用
-        if len(first_message) <= 15:
+        import re
+
+        # 1. 如果消息很短，直接使用
+        if len(first_message) <= 20:
             return first_message
 
-        # 提取关键词生成标题
-        keywords = self._extract_keywords(first_message)
-        if keywords:
-            title = f"关于{'、'.join(keywords[:3])}的对话"
-            if len(title) > 30:
-                title = title[:27] + "..."
-            return title
+        # 2. 清理消息文本
+        clean_message = first_message.strip()
+        # 移除标点符号和多余空格
+        clean_message = re.sub(r'[，。？！、：；""''【】（）\[\]\{\}]', '', clean_message)
+        clean_message = ' '.join(clean_message.split())
 
-        # 默认标题
-        return first_message[:20] + "..." if len(first_message) > 20 else first_message
+        # 3. 提取关键意图生成标题
+        intent_title = self._generate_intent_title(clean_message)
+        if intent_title:
+            return intent_title
+
+        # 4. 提取关键词生成标题
+        keywords = self._extract_keywords(clean_message)
+        if keywords:
+            if len(keywords) == 1:
+                return f"关于{keywords[0]}的讨论"
+            elif len(keywords) == 2:
+                return f"{keywords[0]}与{keywords[1]}"
+            else:
+                title = f"关于{'、'.join(keywords[:3])}的讨论"
+                if len(title) > 25:
+                    title = title[:22] + "..."
+                return title
+
+        # 5. 智能截取
+        return self._smart_truncate(clean_message)
+
+    def _generate_intent_title(self, message: str) -> str | None:
+        """根据用户意图生成标题"""
+        message = message.lower()
+
+        # 训练计划相关
+        if any(kw in message for kw in ['训练计划', '今天训练', '制定计划', '安排训练']):
+            if '减脂' in message or '减肥' in message:
+                return '减脂训练计划'
+            elif '增肌' in message or '肌肉' in message:
+                return '增肌训练计划'
+            elif '力量' in message:
+                return '力量训练计划'
+            elif '有氧' in message:
+                return '有氧训练计划'
+            return '训练计划咨询'
+
+        # 问题咨询
+        if any(kw in message for kw in ['怎么办', '如何', '怎么', '怎样', '能不能', '可以']):
+            if '瘦' in message or '减' in message:
+                return '减脂咨询'
+            elif '肌肉' in message or '增肌' in message:
+                return '增肌咨询'
+            elif '疼痛' in message or '受伤' in message or '酸痛' in message:
+                return '运动恢复咨询'
+            elif '饮食' in message or '吃' in message or '营养' in message:
+                return '饮食营养咨询'
+            return '健身问题咨询'
+
+        # 动作指导
+        if any(kw in message for kw in ['怎么做', '动作', '姿势', '标准']):
+            if '深蹲' in message:
+                return '深蹲动作指导'
+            elif '俯卧撑' in message:
+                return '俯卧撑指导'
+            elif '跑步' in message:
+                return '跑步姿势指导'
+            elif '拉伸' in message or '柔韧' in message:
+                return '拉伸指导'
+            return '动作指导咨询'
+
+        # 建议咨询
+        if any(kw in message for kw in ['建议', '推荐', '有什么']):
+            if '运动' in message or '训练' in message:
+                return '运动建议'
+            elif '动作' in message:
+                return '动作推荐'
+            elif '计划' in message:
+                return '计划推荐'
+            return '健身建议'
+
+        return None
+
+    def _smart_truncate(self, message: str, max_length: int = 20) -> str:
+        """智能截取消息生成标题"""
+        # 按句子分割
+        sentences = re.split(r'[。！？\n]', message)
+        if sentences and sentences[0]:
+            first_sentence = sentences[0].strip()
+            if len(first_sentence) <= max_length:
+                return first_sentence
+            # 在关键词处截断
+            for i in range(min(len(first_sentence), max_length), 0, -1):
+                if first_sentence[i] in ' ,，、':
+                    return first_sentence[:i] + '...'
+            return first_sentence[:max_length-3] + '...'
+
+        return message[:max_length] + '...' if len(message) > max_length else message
 
     def _extract_keywords(self, text: str) -> List[str]:
         """从文本中提取关键词"""
-        # 健身相关关键词库
+        # 健身相关关键词库（按优先级排序）
         fitness_keywords = [
-            "训练", "健身", "运动", "锻炼", "计划", "肌肉", "减脂", "增肌",
-            "有氧", "力量", "瑜伽", "拉伸", "跑步", "深蹲", "俯卧撑",
-            "腹部", "腿部", "背部", "胸部", "手臂", "核心", "体能",
-            "膝盖", "腰部", "肩膀", "恢复", "休息", "饮食", "营养"
+            # 训练相关
+            "训练", "健身", "运动", "锻炼", "计划",
+            # 目标相关
+            "减脂", "增肌", "减肥", "塑形", "体能",
+            # 部位相关
+            "腹部", "腿部", "背部", "胸部", "手臂", "核心", "肩膀", "臀部",
+            # 动作相关
+            "深蹲", "俯卧撑", "跑步", "瑜伽", "拉伸", "有氧", "力量", "硬拉", "卧推",
+            # 恢复饮食
+            "饮食", "营养", "恢复", "休息", "睡眠", "拉伸", "放松",
         ]
 
         found = []
+        text_lower = text.lower()
         for keyword in fitness_keywords:
-            if keyword in text:
-                found.append(keyword)
+            if keyword in text_lower:
+                # 避免重复添加
+                if keyword not in found:
+                    found.append(keyword)
 
-        return found
+        return found[:4]  # 最多返回4个关键词
 
     async def get_user_memory(
         self,

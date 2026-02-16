@@ -13,7 +13,13 @@ from app.schemas.workout import (
     WorkoutPlanSchema,
     WorkoutPlanResponse,
     WorkoutPlanApplyRequest,
+    WorkoutProgressSchema,
+    WorkoutProgressCreateRequest,
+    WorkoutProgressUpdateRequest,
+    WorkoutProgressResponse,
 )
+from app.models.workout_progress import WorkoutProgress
+from datetime import datetime
 
 router = APIRouter(prefix="/workouts", tags=["训练计划"])
 
@@ -22,14 +28,16 @@ router = APIRouter(prefix="/workouts", tags=["训练计划"])
 async def get_today_plan(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    plan_date: Optional[date] = Query(None, description="指定日期，格式如 2024-01-01，默认为今日"),
 ):
     """
     获取今日训练计划
 
     优先返回已应用的计划，否则返回最新生成的计划
+    支持通过 plan_date 参数指定日期，以支持不同时区的用户
     """
     service = AIService(db)
-    plan = await service.get_today_plan(str(current_user.id))
+    plan = await service.get_today_plan(str(current_user.id), plan_date=plan_date)
 
     if plan:
         return plan
@@ -152,3 +160,196 @@ async def get_plan(
         )
 
     return plan
+
+
+@router.get("/records")
+async def get_workout_records(
+    start_date: Optional[date] = Query(None, description="开始日期 (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取训练记录列表
+
+    用于同步本地数据到后端后的数据拉取
+    """
+    service = WorkoutService(db)
+    records = await service.get_user_records_for_sync(
+        user_id=str(current_user.id),
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    return {"records": records}
+
+
+@router.get("/stats/monthly")
+async def get_monthly_stats(
+    year: int = Query(..., description="年份"),
+    month: int = Query(..., ge=1, le=12, description="月份 (1-12)"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取月度统计数据
+
+    返回指定月份的训练统计数据，包括总时长、完成天数、每日记录等
+    """
+    service = WorkoutService(db)
+    stats = await service.get_monthly_stats(
+        user_id=str(current_user.id),
+        year=year,
+        month=month
+    )
+
+    return stats
+
+
+# ========== 训练进度 API ==========
+
+@router.get("/progress/today", response_model=WorkoutProgressSchema)
+async def get_today_progress(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取今日训练进度
+
+    返回今天的训练进度（如果有）
+    """
+    from sqlalchemy import select
+    from datetime import date
+
+    today = date.today().strftime("%Y-%m-%d")
+
+    result = await db.execute(
+        select(WorkoutProgress)
+        .where(WorkoutProgress.user_id == str(current_user.id))
+        .where(WorkoutProgress.date_key == today)
+    )
+    progress = result.scalar_one_or_none()
+
+    if progress:
+        return progress
+    return None
+
+
+@router.post("/progress", response_model=WorkoutProgressResponse)
+async def create_progress(
+    request: WorkoutProgressCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    创建新的训练进度
+
+    开始一个新训练时调用，会覆盖当天的现有进度
+    """
+    from datetime import date
+    from sqlalchemy import select, delete
+
+    today = date.today().strftime("%Y-%m-%d")
+    now = datetime.utcnow()
+
+    # 先删除当天的现有进度
+    await db.execute(
+        delete(WorkoutProgress)
+        .where(WorkoutProgress.user_id == str(current_user.id))
+        .where(WorkoutProgress.date_key == today)
+    )
+
+    # 创建新进度
+    progress = WorkoutProgress(
+        user_id=str(current_user.id),
+        date_key=today,
+        plan_id=request.plan_id,
+        status="not_started",
+        current_module_index=0,
+        current_exercise_index=0,
+        total_exercises=request.total_exercises,
+        completed_exercise_ids=[],
+        start_time=now,
+        last_update_time=now,
+        actual_duration=0,
+    )
+    db.add(progress)
+    await db.commit()
+    await db.refresh(progress)
+
+    return WorkoutProgressResponse(success=True, progress=progress)
+
+
+@router.put("/progress", response_model=WorkoutProgressResponse)
+async def update_progress(
+    request: WorkoutProgressUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    更新训练进度
+
+    在训练过程中实时更新进度
+    """
+    from datetime import date
+    from sqlalchemy import select
+
+    today = date.today().strftime("%Y-%m-%d")
+
+    result = await db.execute(
+        select(WorkoutProgress)
+        .where(WorkoutProgress.user_id == str(current_user.id))
+        .where(WorkoutProgress.date_key == today)
+    )
+    progress = result.scalar_one_or_none()
+
+    if not progress:
+        return WorkoutProgressResponse(
+            success=False,
+            error="未找到今日训练进度"
+        )
+
+    # 更新字段
+    if request.status is not None:
+        progress.status = request.status
+    if request.current_module_index is not None:
+        progress.current_module_index = request.current_module_index
+    if request.current_exercise_index is not None:
+        progress.current_exercise_index = request.current_exercise_index
+    if request.completed_exercise_ids is not None:
+        progress.completed_exercise_ids = request.completed_exercise_ids
+    if request.actual_duration is not None:
+        progress.actual_duration = request.actual_duration
+
+    progress.last_update_time = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(progress)
+
+    return WorkoutProgressResponse(success=True, progress=progress)
+
+
+@router.delete("/progress")
+async def clear_progress(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    清除今日训练进度
+
+    重置今天的训练进度
+    """
+    from datetime import date
+    from sqlalchemy import delete
+
+    today = date.today().strftime("%Y-%m-%d")
+
+    await db.execute(
+        delete(WorkoutProgress)
+        .where(WorkoutProgress.user_id == str(current_user.id))
+        .where(WorkoutProgress.date_key == today)
+    )
+    await db.commit()
+
+    return {"success": True, "message": "进度已清除"}

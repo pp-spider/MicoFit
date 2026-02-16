@@ -270,3 +270,99 @@ class ChatAgent:
             "plan": plan,
             "has_plan": plan is not None
         }
+
+    async def chat_stream_continue(
+        self,
+        user_id: str,
+        session_id: str,
+        existing_content: str,
+        user_profile: dict | None = None,
+        history: list[dict] | None = None,
+        context_summary: str | None = None,
+        recent_memories: list[str] | None = None
+    ) -> AsyncGenerator[dict, None]:
+        """
+        继续之前的流式生成
+
+        当应用从后台恢复时，继续生成剩余内容
+
+        Args:
+            user_id: 用户ID
+            session_id: 会话ID
+            existing_content: 已有的内容（前端已接收的部分）
+            user_profile: 用户画像
+            history: 历史消息
+            context_summary: 会话上下文摘要
+            recent_memories: 近期跨会话记忆
+
+        Yields:
+            dict: 包含类型和数据的字典
+        """
+        messages = []
+
+        # 系统提示词
+        system_prompt = build_system_prompt(
+            user_profile=user_profile,
+            context_summary=context_summary,
+            recent_memories=recent_memories
+        )
+        messages.append(SystemMessage(content=system_prompt))
+
+        # 历史消息
+        if history:
+            recent_history = history[-self.MAX_HISTORY_MESSAGES:]
+            for msg in recent_history:
+                role = msg.get("role")
+                content = msg.get("content", "")
+                if role == "system" or not content.strip():
+                    continue
+                if len(content) > 1000:
+                    content = content[:1000] + "..."
+                if role == "user":
+                    messages.append(HumanMessage(content=content))
+                elif role == "assistant":
+                    messages.append(AIMessage(content=content))
+
+        # 添加一个特殊消息，告诉 LLM 之前已经生成了什么
+        continuation_prompt = (
+            f"[继续生成]\n"
+            f"之前的回复已经生成了以下内容：\n\n"
+            f"{existing_content}\n\n"
+            f"请继续生成剩余的回复内容。如果之前的回复已经完整，请回复'继续内容已结束'。"
+        )
+        messages.append(HumanMessage(content=continuation_prompt))
+
+        estimated_tokens = self._estimate_tokens(messages)
+        logger.info(f"继续流式聊天，用户: {user_id}, 消息数: {len(messages)}, 预估token: {estimated_tokens}")
+
+        try:
+            chunk_count = 0
+
+            async for chunk in self.llm.astream(messages):
+                if chunk.content:
+                    # 检查是否是"继续内容已结束"的响应
+                    if chunk.content.strip() in ["继续内容已结束", "continue", "END"]:
+                        logger.info("检测到继续内容已结束")
+                        break
+
+                    chunk_count += 1
+                    yield {
+                        "type": "chunk",
+                        "content": chunk.content
+                    }
+
+            logger.info(f"继续生成完成，共 {chunk_count} 个块")
+
+            yield {
+                "type": "done",
+                "has_plan": False
+            }
+
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            logger.error(f"继续生成出错: {e}\n{error_detail}")
+            yield {
+                "type": "error",
+                "message": f"继续生成出错: {type(e).__name__}: {str(e)}"
+            }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/workout_progress.dart';
 import '../models/workout.dart';
 import '../services/workout_progress_service.dart';
+import '../services/offline_queue_service.dart';
 
 /// 训练进度状态管理
 class WorkoutProgressProvider extends ChangeNotifier {
@@ -101,6 +102,16 @@ class WorkoutProgressProvider extends ChangeNotifier {
 
     try {
       await _service.completeWorkout(_progress!.planId);
+
+      // 添加到离线同步队列
+      final recordData = {
+        'planId': _progress!.planId,
+        'completedAt': DateTime.now().toIso8601String(),
+        'duration': _progress!.actualDuration,
+        'completedExercises': _progress!.completedExerciseIds,
+      };
+      await OfflineQueueService().addWorkoutRecord(recordData);
+
       await loadTodayProgress(); // 重新加载以获取更新后的状态
       _errorMessage = null;
     } catch (e) {

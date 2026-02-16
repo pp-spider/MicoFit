@@ -542,7 +542,7 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
               const SizedBox(width: 12),
               const Text(
-                '运动目标设置',
+                '运动目标',
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
                   color: Color(0xFF115E59),
@@ -550,58 +550,49 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
 
-          // Weekly Days Slider
-          _buildSlider(
-            label: '每周运动天数',
-            value: _weeklyDays.toDouble(),
-            min: 2,
-            max: 7,
-            unit: ' 天',
-            onChanged: (value) {
-              setState(() {
-                _weeklyDays = value.toInt();
-              });
-            },
-          ),
-
-          const SizedBox(height: 20),
-
-          // Duration Slider
-          _buildSlider(
-            label: '每次训练时长',
-            value: _timeBudget.toDouble(),
-            min: 5,
-            max: 30,
-            step: 5,
-            unit: ' 分钟',
-            onChanged: (value) {
-              setState(() {
-                _timeBudget = value.toInt();
-              });
-            },
-          ),
-
-          const SizedBox(height: 20),
-
-          // Save Button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                // 调用外部保存回调
-                widget.onSaveGoals?.call(_weeklyDays, _timeBudget);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2DD4BF),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+          // 运动目标 - 静态展示（类似场景元素）
+          Row(
+            children: [
+              Expanded(
+                child: _buildGoalCard(
+                  icon: Icons.calendar_today,
+                  label: '每周运动',
+                  value: '$_weeklyDays 天',
                 ),
               ),
-              child: const Text('保存目标'),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildGoalCard(
+                  icon: Icons.timer,
+                  label: '每次训练',
+                  value: '$_timeBudget 分钟',
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // 提示文字
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 16, color: Colors.grey[500]),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '如需修改目标，请在信息录入中重新设置',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -609,56 +600,43 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _buildSlider({
+  /// 构建目标卡片（静态展示）
+  Widget _buildGoalCard({
+    required IconData icon,
     required String label,
-    required double value,
-    required int min,
-    required int max,
-    int step = 1,
-    required String unit,
-    required ValueChanged<double> onChanged,
+    required String value,
   }) {
-    final displayValue = value.toInt();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              label,
-              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-            ),
-            Text(
-              '$displayValue$unit',
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: Color(0xFF115E59),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: const Color(0xFF2DD4BF)),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF115E59),
             ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        SliderTheme(
-          data: SliderThemeData(
-            trackHeight: 8,
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 10),
-            overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-            activeTrackColor: const Color(0xFF2DD4BF),
-            inactiveTrackColor: const Color(0xFFE5E7EB),
-            thumbColor: const Color(0xFF2DD4BF),
-            overlayColor: const Color(0xFF2DD4BF).withValues(alpha: 0.2),
           ),
-          child: Slider(
-            value: value,
-            min: min.toDouble(),
-            max: max.toDouble(),
-            divisions: ((max - min) / step).ceil(),
-            onChanged: onChanged,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

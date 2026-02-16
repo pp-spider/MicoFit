@@ -1,5 +1,5 @@
 """训练计划 Schema"""
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
@@ -89,4 +89,45 @@ class AdjustmentSuggestionResponse(BaseModel):
     success: bool
     suggestion: Optional[str] = None
     adjusted_params: Optional[dict] = None
+    error: Optional[str] = None
+
+
+# ========== 训练进度相关 Schema ==========
+
+class WorkoutProgressSchema(BaseModel):
+    """训练进度 Schema"""
+    id: str
+    date_key: str
+    plan_id: str
+    status: str
+    current_module_index: int
+    current_exercise_index: int
+    total_exercises: int
+    completed_exercise_ids: List[str] = []
+    start_time: datetime
+    last_update_time: datetime
+    actual_duration: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class WorkoutProgressCreateRequest(BaseModel):
+    """创建训练进度请求"""
+    plan_id: str
+    total_exercises: int
+
+
+class WorkoutProgressUpdateRequest(BaseModel):
+    """更新训练进度请求"""
+    status: Optional[str] = None
+    current_module_index: Optional[int] = None
+    current_exercise_index: Optional[int] = None
+    completed_exercise_ids: Optional[List[str]] = None
+    actual_duration: Optional[int] = None
+
+
+class WorkoutProgressResponse(BaseModel):
+    """训练进度响应"""
+    success: bool
+    progress: Optional[WorkoutProgressSchema] = None
     error: Optional[str] = None

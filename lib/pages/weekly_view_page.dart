@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/weekly_data.dart';
-import '../models/workout_record.dart';
-import '../models/feedback.dart';
 import '../widgets/bottom_nav.dart';
-import '../services/record_local_service.dart';
 import '../providers/monthly_stats_provider.dart';
 
 /// 打卡记录页面 - 月度视图
@@ -27,12 +24,6 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
   int? selectedDayIndex;
   late AnimationController _progressController;
 
-  // 反馈统计数据
-  List<WorkoutRecord> _monthlyRecords = [];
-  double _avgCompletionScore = 0.0;
-  String _commonFeeling = '';
-  List<String> _issues = [];
-
   @override
   void initState() {
     super.initState();
@@ -40,85 +31,6 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..forward();
-    _loadFeedbackData();
-  }
-
-  /// 加载本月的反馈数据
-  Future<void> _loadFeedbackData() async {
-    try {
-      final service = RecordLocalService();
-      final records = await service.getRecentRecords(limit: 100);
-
-      // 筛选本月记录
-      final monthlyRecords = records.where((r) =>
-        r.date.year == _monthlyData.year &&
-        r.date.month == _monthlyData.month
-      ).toList();
-
-      if (mounted) {
-        setState(() {
-          _monthlyRecords = monthlyRecords;
-          _calculateFeedbackStats();
-        });
-      }
-    } catch (e) {
-      debugPrint('加载反馈数据失败: $e');
-    }
-  }
-
-  /// 计算反馈统计数据
-  void _calculateFeedbackStats() {
-    if (_monthlyRecords.isEmpty) {
-      _avgCompletionScore = 0.0;
-      _commonFeeling = '暂无数据';
-      _issues = [];
-      return;
-    }
-
-    // 计算平均完成度分数
-    double totalScore = 0;
-    final feelingCounts = <FeelingLevel, int>{};
-
-    for (final record in _monthlyRecords) {
-      // 完成度评分: tooHard=0.3, barely=0.5, smooth=0.8, easy=1.0
-      switch (record.feedback.completion) {
-        case CompletionLevel.tooHard:
-          totalScore += 0.3;
-          break;
-        case CompletionLevel.barely:
-          totalScore += 0.5;
-          break;
-        case CompletionLevel.smooth:
-          totalScore += 0.8;
-          break;
-        case CompletionLevel.easy:
-          totalScore += 1.0;
-          break;
-      }
-
-      // 统计感受
-      final feeling = record.feedback.feeling;
-      feelingCounts[feeling] = (feelingCounts[feeling] ?? 0) + 1;
-
-      // 收集问题
-      if (record.feedback.completion == CompletionLevel.tooHard) {
-        _issues.add('训练强度过高');
-      }
-      if (record.feedback.feeling == FeelingLevel.uncomfortable) {
-        _issues.add('身体不适需要关注');
-      }
-      if (record.feedback.tomorrow == TomorrowPreference.recovery) {
-        _issues.add('需要更多恢复时间');
-      }
-    }
-
-    // 计算平均值
-    _avgCompletionScore = totalScore / _monthlyRecords.length;
-
-    // 找出最常见的感受
-    final mostCommonFeeling = feelingCounts.entries
-        .reduce((a, b) => (a.value > b.value) ? a : b);
-    _commonFeeling = mostCommonFeeling.key.label;
   }
 
   // Getter 方便访问数据
@@ -155,11 +67,6 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
 
                     // Progress Card
                     _buildProgressCard(),
-
-                    const SizedBox(height: 24),
-
-                    // AI Insight
-                    _buildAIInsight(),
 
                     const SizedBox(height: 24),
 
@@ -617,117 +524,6 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
         ],
       ),
     );
-  }
-
-  Widget _buildAIInsight() {
-    // 生成基于反馈的洞察文本
-    final insightText = _generateInsightText();
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF7ED),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFFED7AA)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: const BoxDecoration(
-              color: Color(0xFF8B5CF6),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.lightbulb,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'AI洞察',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF5B21B6),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  insightText,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[800],
-                    height: 1.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 生成基于反馈数据的洞察文本
-  String _generateInsightText() {
-    if (_monthlyRecords.isEmpty) {
-      return '本月还没有训练记录，完成第一次训练后AI将为你生成个性化洞察！';
-    }
-
-    final buffer = StringBuffer();
-    final score = (_avgCompletionScore * 100).toInt();
-
-    // 开场总结
-    buffer.writeln('💪 ${_monthlyData.month}月训练小结');
-    buffer.writeln();
-
-    // 评分
-    buffer.writeln('**综合评分**: $score/100');
-    buffer.writeln('完成度: ${_getCompletionLabel(_avgCompletionScore)}');
-    buffer.writeln('身体感受: $_commonFeeling');
-    buffer.writeln();
-
-    // 建议部分
-    if (_issues.isNotEmpty) {
-      buffer.writeln('**需要关注**:');
-      _issues.take(2).forEach((issue) {
-        buffer.writeln('• $issue');
-      });
-      buffer.writeln();
-    }
-
-    // 鼓励语
-    buffer.writeln(_getEncouragement(score));
-
-    return buffer.toString().trim();
-  }
-
-  /// 获取完成度标签
-  String _getCompletionLabel(double score) {
-    if (score >= 0.8) return '优秀';
-    if (score >= 0.6) return '良好';
-    if (score >= 0.4) return '一般';
-    return '需改进';
-  }
-
-  /// 根据分数获取鼓励语
-  String _getEncouragement(int score) {
-    if (score >= 80) {
-      return '🎉 太棒了！你的训练状态非常好，继续保持！';
-    } else if (score >= 60) {
-      return '👍 表现不错！再接再厉，挑战更高目标！';
-    } else if (score >= 40) {
-      return '💪 继续坚持！每一次训练都在进步！';
-    } else {
-      return '🌱 不要气馁！科学训练，循序渐进！';
-    }
   }
 
   Widget _buildDayDetail() {

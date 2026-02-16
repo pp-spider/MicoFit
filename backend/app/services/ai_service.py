@@ -164,6 +164,124 @@ class AIService:
             elif chunk["type"] == "error":
                 yield chunk
 
+    async def continue_stream_chat(
+        self,
+        user_id: str,
+        session_id: str,
+        existing_content: str
+    ) -> AsyncGenerator[dict, None]:
+        """
+        继续之前的流式生成
+
+        当应用从后台恢复时，调用此接口继续生成剩余内容
+
+        Args:
+            user_id: 用户ID
+            session_id: 会话ID
+            existing_content: 已有的内容（前端已接收的部分）
+
+        Yields:
+            dict: SSE事件数据
+        """
+        # 验证会话存在
+        session = await self.chat_service.get_session(session_id)
+        if not session or str(session.user_id) != user_id:
+            yield {
+                "type": "error",
+                "message": "会话不存在或无权访问"
+            }
+            return
+
+        # 获取用户画像
+        user_profile = await self.user_service.get_user_profile(user_id)
+        profile_dict = None
+        if user_profile:
+            profile_dict = {
+                "user_id": str(user_profile.user_id),
+                "nickname": user_profile.nickname,
+                "fitness_level": user_profile.fitness_level,
+                "goal": user_profile.goal,
+                "scene": user_profile.scene,
+                "time_budget": user_profile.time_budget,
+                "limitations": user_profile.limitations,
+                "equipment": user_profile.equipment,
+                "weekly_days": user_profile.weekly_days,
+            }
+
+        # 获取会话上下文
+        context = await self.context_service.get_context_for_chat(
+            session_id=session_id,
+            user_profile=profile_dict
+        )
+
+        # 获取历史消息
+        history = await self.chat_service.get_session_messages(session_id, limit=30)
+        history_dicts = [
+            {"role": msg.role, "content": msg.content}
+            for msg in history
+        ]
+
+        # 获取用户跨会话记忆
+        user_memory = await self.context_service.get_user_memory(user_id, days=7)
+        recent_memories = user_memory.get("recent_topics", [])[:3]
+
+        # 流式继续生成回复（传入 existing_content 作为已生成的内容）
+        full_content = existing_content
+        workout_plan = None
+
+        async for chunk in self.chat_agent.chat_stream_continue(
+            user_id=user_id,
+            session_id=session_id,
+            existing_content=existing_content,
+            user_profile=profile_dict,
+            history=history_dicts,
+            context_summary=context.get("summary"),
+            recent_memories=recent_memories
+        ):
+            if chunk["type"] == "chunk":
+                full_content += chunk["content"]
+                yield chunk
+            elif chunk["type"] == "plan":
+                workout_plan = chunk["plan"]
+                # 保存计划到数据库
+                try:
+                    plan_record = await self.workout_service.create_plan(
+                        user_id=user_id,
+                        plan_date=date.today(),
+                        title=workout_plan["title"],
+                        subtitle=workout_plan.get("subtitle", ""),
+                        total_duration=workout_plan["total_duration"],
+                        scene=workout_plan["scene"],
+                        rpe=workout_plan["rpe"],
+                        modules=workout_plan["modules"],
+                        ai_note=workout_plan.get("ai_note"),
+                        is_applied=False
+                    )
+                    workout_plan["id"] = str(plan_record.id)
+                    yield {
+                        "type": "plan",
+                        "plan": workout_plan,
+                        "plan_id": str(plan_record.id)
+                    }
+                except Exception:
+                    yield chunk
+            elif chunk["type"] == "done":
+                # 更新已有消息或添加新消息
+                await self.context_service.add_message_and_update_summary(
+                    session_id=session_id,
+                    role="assistant",
+                    content=full_content,
+                    structured_data=workout_plan,
+                    data_type="workout_plan" if workout_plan else "text"
+                )
+                yield {
+                    "type": "done",
+                    "session_id": session_id,
+                    "has_plan": workout_plan is not None
+                }
+            elif chunk["type"] == "error":
+                yield chunk
+
     async def generate_workout_plan(
         self,
         user_id: str,
@@ -302,22 +420,30 @@ class AIService:
                     "message": f"保存计划失败: {str(e)}"
                 }
 
-    async def get_today_plan(self, user_id: str) -> dict | None:
+    async def get_today_plan(
+        self,
+        user_id: str,
+        plan_date: date | None = None,
+    ) -> dict | None:
         """
         获取今日计划（优先返回已应用的，否则返回最新生成的）
 
         Args:
             user_id: 用户ID
+            plan_date: 指定日期，默认为今日（支持不同时区）
 
         Returns:
             dict | None: 计划数据
         """
+        # 如果没有指定日期，使用今日
+        target_date = plan_date if plan_date else date.today()
+
         # 先查询已应用的今日计划
         result = await self.db.execute(
             select(WorkoutPlanModel)
             .where(
                 WorkoutPlanModel.user_id == user_id,
-                WorkoutPlanModel.plan_date == date.today(),
+                WorkoutPlanModel.plan_date == target_date,
                 WorkoutPlanModel.is_applied == True
             )
         )
@@ -343,7 +469,7 @@ class AIService:
             select(WorkoutPlanModel)
             .where(
                 WorkoutPlanModel.user_id == user_id,
-                WorkoutPlanModel.plan_date == date.today()
+                WorkoutPlanModel.plan_date == target_date
             )
             .order_by(desc(WorkoutPlanModel.created_at))
             .limit(1)

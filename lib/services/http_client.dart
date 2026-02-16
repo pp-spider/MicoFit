@@ -28,9 +28,13 @@ class ApiHttpClient {
   Future<http.Response> get(
     String path, {
     Map<String, String>? headers,
+    Map<String, String>? queryParams,
     bool requireAuth = true,
   }) async {
-    final uri = Uri.parse('$baseUrl$path');
+    var uri = Uri.parse('$baseUrl$path');
+    if (queryParams != null && queryParams.isNotEmpty) {
+      uri = uri.replace(queryParameters: queryParams);
+    }
     final requestHeaders = await _buildHeaders(headers, requireAuth);
 
     return http.get(uri, headers: requestHeaders);

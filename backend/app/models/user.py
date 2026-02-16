@@ -34,6 +34,9 @@ class User(Base):
     # 关联训练记录
     workout_records = relationship("WorkoutRecord", back_populates="user", cascade="all, delete-orphan")
 
+    # 关联训练进度
+    workout_progress = relationship("WorkoutProgress", back_populates="user", cascade="all, delete-orphan")
+
     # 关联聊天会话
     chat_sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
 

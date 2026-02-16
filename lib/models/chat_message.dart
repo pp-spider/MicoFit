@@ -43,6 +43,9 @@ class ChatMessage {
   final Map<String, dynamic>? structuredData;
   final ChatMessageDataType? dataType;
 
+  // 会话ID（从后端获取时）
+  final String? sessionId;
+
   ChatMessage({
     required this.id,
     required this.type,
@@ -50,6 +53,7 @@ class ChatMessage {
     required this.timestamp,
     this.structuredData,
     this.dataType,
+    this.sessionId,
   });
 
   /// 创建用户消息
@@ -87,7 +91,7 @@ class ChatMessage {
     );
   }
 
-  /// 从JSON创建
+  /// 从JSON创建（本地格式）
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
       id: json['id'] as String,
@@ -101,6 +105,25 @@ class ChatMessage {
               orElse: () => ChatMessageDataType.workoutPlan,
             )
           : null,
+      sessionId: json['sessionId'] as String?,
+    );
+  }
+
+  /// 从后端API响应创建
+  factory ChatMessage.fromApiJson(Map<String, dynamic> json) {
+    return ChatMessage(
+      id: json['id'] as String,
+      type: ChatMessageTypeExtension.fromString(json['role'] as String),
+      content: json['content'] as String,
+      timestamp: DateTime.parse(json['created_at'] as String),
+      structuredData: json['structured_data'] as Map<String, dynamic>?,
+      dataType: json['data_type'] != null
+          ? ChatMessageDataType.values.firstWhere(
+              (e) => e.name == json['data_type'],
+              orElse: () => ChatMessageDataType.workoutPlan,
+            )
+          : null,
+      sessionId: json['session_id'] as String?,
     );
   }
 
@@ -113,6 +136,7 @@ class ChatMessage {
       'timestamp': timestamp.toIso8601String(),
       if (structuredData != null) 'structuredData': structuredData,
       if (dataType != null) 'dataType': dataType!.name,
+      if (sessionId != null) 'sessionId': sessionId,
     };
   }
 
@@ -124,6 +148,7 @@ class ChatMessage {
     DateTime? timestamp,
     Map<String, dynamic>? structuredData,
     ChatMessageDataType? dataType,
+    String? sessionId,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -132,6 +157,7 @@ class ChatMessage {
       timestamp: timestamp ?? this.timestamp,
       structuredData: structuredData ?? this.structuredData,
       dataType: dataType ?? this.dataType,
+      sessionId: sessionId ?? this.sessionId,
     );
   }
 }

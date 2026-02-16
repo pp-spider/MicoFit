@@ -1,19 +1,43 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/workout_progress.dart';
 import '../models/workout.dart';
+import '../utils/user_data_helper.dart';
+import 'workout_api_service.dart';
+import 'offline_queue_service.dart';
 
 /// 训练进度服务 - 管理训练进度的保存和加载
+/// 支持本地持久化和后端同步，确保多设备数据一致
 class WorkoutProgressService {
   /// 存储键
   static const String _keyProgress = AppConfig.keyWorkoutProgress;
 
+  final WorkoutApiService _apiService = WorkoutApiService();
+
   /// 获取今日进度
+  /// 优先从后端获取，后端失败时使用本地缓存
   Future<WorkoutProgress?> getTodayProgress() async {
-    final prefs = await SharedPreferences.getInstance();
-    final progressJson = prefs.getString(_keyProgress);
+    // 1. 尝试从后端获取
+    try {
+      final remoteProgress = await _apiService.getTodayProgress();
+      if (remoteProgress != null) {
+        // 后端有数据，同步到本地并返回
+        await _saveToLocal(remoteProgress);
+        debugPrint('[WorkoutProgressService] 从后端获取进度成功');
+        return remoteProgress;
+      }
+    } catch (e) {
+      debugPrint('[WorkoutProgressService] 从后端获取进度失败: $e');
+    }
+
+    // 2. 后端没有数据或失败，从本地获取
+    return _getFromLocal();
+  }
+
+  /// 从本地获取进度
+  Future<WorkoutProgress?> _getFromLocal() async {
+    final progressJson = await UserDataHelper.getString(_keyProgress);
 
     if (progressJson == null) return null;
 
@@ -45,13 +69,74 @@ class WorkoutProgressService {
     }
   }
 
-  /// 保存进度
-  Future<void> saveProgress(WorkoutProgress progress) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
+  /// 保存进度到本地
+  Future<void> _saveToLocal(WorkoutProgress progress) async {
+    await UserDataHelper.setString(
       _keyProgress,
       jsonEncode(progress.toJson()),
     );
+  }
+
+  /// 保存进度（同时保存到本地和后端）
+  Future<void> saveProgress(WorkoutProgress progress) async {
+    // 1. 先保存到本地
+    await _saveToLocal(progress);
+
+    // 2. 同步到后端，失败时加入离线队列
+    try {
+      await _syncToBackend(progress);
+    } catch (e) {
+      debugPrint('[WorkoutProgressService] 同步到后端失败: $e');
+      // 后端失败，加入离线队列等待后续同步
+      await _addToOfflineQueue(progress);
+    }
+  }
+
+  /// 将进度添加到离线队列
+  Future<void> _addToOfflineQueue(WorkoutProgress progress) async {
+    final progressData = {
+      'planId': progress.planId,
+      'status': progress.status.name,
+      'currentModuleIndex': progress.currentModuleIndex,
+      'currentExerciseIndex': progress.currentExerciseIndex,
+      'completedExerciseIds': progress.completedExerciseIds,
+      'actualDuration': progress.actualDuration,
+      'totalExercises': progress.totalExercises,
+      'startTime': progress.startTime.toIso8601String(),
+    };
+
+    // 根据状态决定操作类型
+    final operationType = progress.status == WorkoutStatus.notStarted
+        ? 'CREATE'
+        : 'UPDATE';
+
+    try {
+      await OfflineQueueService().addWorkoutProgress(operationType, progressData);
+      debugPrint('[WorkoutProgressService] 已加入离线队列');
+    } catch (e) {
+      debugPrint('[WorkoutProgressService] 加入离线队列失败: $e');
+    }
+  }
+
+  /// 同步进度到后端
+  Future<void> _syncToBackend(WorkoutProgress progress) async {
+    // 根据状态决定调用哪个 API
+    if (progress.status == WorkoutStatus.notStarted) {
+      // 创建新进度
+      await _apiService.createProgress(
+        planId: progress.planId,
+        totalExercises: progress.totalExercises,
+      );
+    } else {
+      // 更新现有进度
+      await _apiService.updateProgress(
+        status: progress.status.name,
+        currentModuleIndex: progress.currentModuleIndex,
+        currentExerciseIndex: progress.currentExerciseIndex,
+        completedExerciseIds: progress.completedExerciseIds,
+        actualDuration: progress.actualDuration,
+      );
+    }
   }
 
   /// 创建初始进度
@@ -137,8 +222,14 @@ class WorkoutProgressService {
 
   /// 清除进度（用于测试或重置）
   Future<void> clearProgress() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_keyProgress);
+    await UserDataHelper.remove(_keyProgress);
+
+    // 同时清除后端进度
+    try {
+      await _apiService.clearProgress();
+    } catch (e) {
+      debugPrint('[WorkoutProgressService] 清除后端进度失败: $e');
+    }
   }
 
   /// 重置今日进度（用于重新开始训练）

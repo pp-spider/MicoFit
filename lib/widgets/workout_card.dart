@@ -6,15 +6,11 @@ import '../providers/workout_progress_provider.dart';
 /// 训练计划卡片
 class WorkoutCard extends StatefulWidget {
   final WorkoutPlan workoutPlan;
-  final int refreshCount;
-  final VoidCallback onRefresh;
   final VoidCallback onStartWorkout;
 
   const WorkoutCard({
     super.key,
     required this.workoutPlan,
-    required this.refreshCount,
-    required this.onRefresh,
     required this.onStartWorkout,
   });
 
@@ -77,51 +73,6 @@ class _WorkoutCardState extends State<WorkoutCard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // AI Badge & Refresh
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEDE9FE),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.sync,
-                        size: 16,
-                        color: Color(0xFF8B5CF6),
-                      ),
-                      const SizedBox(width: 4),
-                      const Text(
-                        '根据昨日反馈自动优化',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF8B5CF6),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: widget.refreshCount > 0 ? widget.onRefresh : null,
-                  icon: const Icon(Icons.refresh, size: 16),
-                  label: Text('换一组 (${widget.refreshCount})'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: widget.refreshCount > 0
-                        ? Colors.grey[600]
-                        : Colors.grey[300],
-                  ),
-                ),
-              ],
-            ),
-
             const SizedBox(height: 24),
 
             // Title

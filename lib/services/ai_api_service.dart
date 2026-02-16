@@ -136,6 +136,62 @@ class AIApiService {
     }
   }
 
+  /// 继续之前的流式生成（SSE）
+  ///
+  /// [sessionId] - 会话ID
+  /// [existingContent] - 已有的内容（前端已接收的部分）
+  Stream<AIStreamChunk> continueStream({
+    required String sessionId,
+    required String existingContent,
+  }) async* {
+    final request = http.Request(
+      'POST',
+      Uri.parse('${AppConfig.apiBaseUrl}/api/v1/ai/chat/continue'),
+    );
+
+    // 添加认证头
+    final token = await _httpClient.getToken();
+    if (token != null) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+
+    request.headers['Content-Type'] = 'application/json';
+    request.headers['Accept'] = 'text/event-stream';
+
+    request.body = jsonEncode({
+      'session_id': sessionId,
+      'existing_content': existingContent,
+    });
+
+    try {
+      final response = await http.Client().send(request);
+
+      if (response.statusCode != 200) {
+        final body = await response.stream.bytesToString();
+        throw Exception('继续生成请求失败: ${response.statusCode} - $body');
+      }
+
+      // 解析 SSE 流
+      await for (final line in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
+        if (line.startsWith('data: ')) {
+          try {
+            final data =
+                jsonDecode(line.substring(6)) as Map<String, dynamic>;
+            yield AIStreamChunk.fromJson(data);
+          } catch (e) {
+            continue;
+          }
+        }
+      }
+    } on SocketException catch (e) {
+      throw Exception('网络连接失败，请检查网络设置: $e');
+    } catch (e) {
+      throw Exception('继续生成流异常: $e');
+    }
+  }
+
   /// 流式生成训练计划（SSE）
   Stream<AIStreamChunk> generateWorkoutPlanStream({
     Map<String, dynamic>? preferences,
