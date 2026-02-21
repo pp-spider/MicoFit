@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Python环境
+执行python相关命令先进入到python3.12环境中(conda activate python3.12)
+
 ## 项目概述
 
 **微动 MicoFit** - 一个基于 Flutter 的健身应用 + FastAPI 后端，为忙碌人群提供 AI 随身教练，利用碎片时间（3-20分钟）在任意场景完成有效训练。

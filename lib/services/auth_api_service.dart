@@ -141,6 +141,10 @@ class AuthApiService {
       key: AppConfig.keyTokenExpiresAt,
       value: tokens.expiresAt.toIso8601String(),
     );
+    await _storage.write(
+      key: AppConfig.keyRefreshTokenExpiresAt,
+      value: tokens.refreshTokenExpiresAt.toIso8601String(),
+    );
   }
 
   /// 清除 Token
@@ -148,6 +152,7 @@ class AuthApiService {
     await _storage.delete(key: AppConfig.keyAccessToken);
     await _storage.delete(key: AppConfig.keyRefreshToken);
     await _storage.delete(key: AppConfig.keyTokenExpiresAt);
+    await _storage.delete(key: AppConfig.keyRefreshTokenExpiresAt);
     await _storage.delete(key: AppConfig.keyUserId);
   }
 
@@ -168,17 +173,26 @@ class AuthApiService {
     return DateTime.parse(expiresAtStr);
   }
 
+  /// 获取 Refresh Token 过期时间
+  Future<DateTime?> getRefreshTokenExpiresAt() async {
+    final expiresAtStr = await _storage.read(key: AppConfig.keyRefreshTokenExpiresAt);
+    if (expiresAtStr == null) return null;
+    return DateTime.parse(expiresAtStr);
+  }
+
   /// 获取存储的用户 ID
   Future<String?> getUserId() async {
     return await _storage.read(key: AppConfig.keyUserId);
   }
 
   /// 检查是否有有效的 Token
+  /// 使用 refresh token 的过期时间来判断登录是否有效（默认7天）
   Future<bool> hasValidToken() async {
     final token = await getAccessToken();
     if (token == null) return false;
 
-    final expiresAt = await getTokenExpiresAt();
+    // 使用 refresh token 的过期时间来判断登录是否有效
+    final expiresAt = await getRefreshTokenExpiresAt();
     if (expiresAt == null) return false;
 
     return DateTime.now().isBefore(expiresAt);

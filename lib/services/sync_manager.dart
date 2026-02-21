@@ -16,7 +16,7 @@ enum SyncStatus {
 }
 
 /// 同步管理器
-/// 监听网络状态，自动同步离线操作队列
+/// 使用轮询机制检测网络状态和离线队列变化，自动同步
 /// 支持定期同步和增量同步
 class SyncManager {
   // 单例模式
@@ -37,31 +37,39 @@ class SyncManager {
   int _totalCount = 0;
   String? _lastError;
 
-  // 流控制器
-  final StreamController<SyncStatus> _statusController =
-      StreamController<SyncStatus>.broadcast();
-  final StreamController<SyncProgress> _progressController =
-      StreamController<SyncProgress>.broadcast();
-
   // 同步锁
   bool _isSyncing = false;
 
-  // 定时同步
+  // 定时同步（轮询间隔）
   Timer? _syncTimer;
   static const Duration _syncInterval = Duration(minutes: 5); // 每5分钟同步一次
+
+  // 轮询检查定时器
+  Timer? _pollTimer;
+  static const Duration _pollInterval = Duration(seconds: 3); // 每3秒检查一次
 
   // 上次同步时间
   DateTime? _lastSyncTime;
 
-  // 监听订阅
-  StreamSubscription? _networkSubscription;
-  StreamSubscription? _queueSubscription;
+  // 上次网络状态（用于检测变化）
+  bool _lastKnownNetworkConnected = false;
 
-  /// 获取状态流
-  Stream<SyncStatus> get onStatusChanged => _statusController.stream;
+  // 上次队列长度（用于检测变化）
+  int _lastKnownQueueLength = 0;
 
-  /// 获取进度流
-  Stream<SyncProgress> get onProgress => _progressController.stream;
+  // 状态/进度变化回调
+  Function(SyncStatus)? _onStatusChangedCallback;
+  Function(SyncProgress)? _onProgressCallback;
+
+  /// 设置状态变化回调
+  void setOnStatusChangedCallback(Function(SyncStatus)? callback) {
+    _onStatusChangedCallback = callback;
+  }
+
+  /// 设置进度变化回调
+  void setOnProgressCallback(Function(SyncProgress)? callback) {
+    _onProgressCallback = callback;
+  }
 
   /// 当前状态
   SyncStatus get status => _status;
@@ -86,41 +94,169 @@ class SyncManager {
 
   /// 初始化同步管理器
   Future<void> init() async {
-    debugPrint('[SyncManager] 初始化同步管理器');
+    debugPrint('[SyncManager] ===== 开始初始化 =====');
 
     // 初始化网络服务
+    debugPrint('[SyncManager] 初始化网络服务...');
     await _networkService.init();
+    // 启动 NetworkService 的轮询，定期更新缓存的网络状态
+    _networkService.startPolling();
+    _lastKnownNetworkConnected = await _networkService.checkConnectivity();
 
     // 初始化离线队列
+    debugPrint('[SyncManager] 初始化离线队列...');
     await _offlineQueue.init();
+    _lastKnownQueueLength = _offlineQueue.queueLength;
 
-    // 监听网络状态变化
-    _networkSubscription = _networkService.onConnectivityChanged.listen(_onNetworkChanged);
-
-    // 监听队列变化
-    _queueSubscription = _offlineQueue.onQueueChanged.listen(_onQueueChanged);
+    // 初始化数据同步服务（加载持久化的同步时间）
+    debugPrint('[SyncManager] 初始化数据同步服务...');
+    await DataSyncService().init();
 
     // 检查当前网络状态
-    final isConnected = await _networkService.isConnected;
-    if (!isConnected) {
+    debugPrint('[SyncManager] 当前网络状态: $_lastKnownNetworkConnected');
+    if (!_lastKnownNetworkConnected) {
       _updateStatus(SyncStatus.offline);
     }
 
+    // 启动轮询检查（网络状态和队列变化）
+    debugPrint('[SyncManager] 启动轮询检查...');
+    _startPolling();
+
     // 启动定期同步
+    debugPrint('[SyncManager] 启动定期同步...');
     _startPeriodicSync();
 
-    debugPrint('[SyncManager] 同步管理器初始化完成');
+    // 立即检查一次队列（需要网络连接、服务器可达、队列有数据）
+    if (_lastKnownQueueLength > 0 && _lastKnownNetworkConnected) {
+      debugPrint('[SyncManager] 初始发现待同步数据，检查服务器可达性...');
+      // 这里不等待，让轮询机制来处理实际的同步
+      // 轮询会检查服务器可达性后再触发同步
+    }
+
+    debugPrint('[SyncManager] ===== 初始化完成 =====');
+  }
+
+  /// 启动轮询检查（网络状态和队列变化）
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(_pollInterval, (_) => _checkAndSync());
+    debugPrint('[SyncManager] 轮询检查已启动，间隔: ${_pollInterval.inSeconds}秒');
+  }
+
+  /// 停止轮询检查
+  void _stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    debugPrint('[SyncManager] 轮询检查已停止');
+  }
+
+  /// 轮询检查并触发同步
+  /// 同时检查网络状态和离线队列状态
+  /// 同步触发条件：网络在线 AND 队列有数据
+  Future<void> _checkAndSync() async {
+    debugPrint('[SyncManager] [轮询] ====================');
+    debugPrint('[SyncManager] [轮询] 开始检查 (网络 + 队列)...');
+
+    if (_isSyncing) {
+      debugPrint('[SyncManager] [轮询] 同步进行中，跳过');
+      return;
+    }
+
+    try {
+      // ========== 同时检查网络状态和离线队列状态 ==========
+
+      // 检查网络状态（使用异步方法实时检查，而不是缓存）
+      final currentNetworkConnected = await _networkService.checkConnectivity();
+      debugPrint('[SyncManager] [轮询] 网络状态: ${currentNetworkConnected ? "在线" : "离线"}');
+
+      // 检查队列状态
+      final currentQueueLength = _offlineQueue.queueLength;
+      final stats = _offlineQueue.getQueueStats();
+      final statsStr = stats.entries
+          .where((e) => e.value > 0)
+          .map((e) => '${e.key}: ${e.value}')
+          .join(', ');
+      debugPrint('[SyncManager] [轮询] 队列状态: $currentQueueLength 条 [$statsStr]');
+
+      // 检测网络状态变化
+      if (currentNetworkConnected != _lastKnownNetworkConnected) {
+        _lastKnownNetworkConnected = currentNetworkConnected;
+        debugPrint('[SyncManager] [轮询] 网络状态变化: ${currentNetworkConnected ? "在线" : "离线"}');
+      }
+
+      // 检测队列变化
+      if (currentQueueLength != _lastKnownQueueLength) {
+        _lastKnownQueueLength = currentQueueLength;
+        debugPrint('[SyncManager] [轮询] 队列变化: $currentQueueLength 条 [$statsStr]');
+      }
+
+      // ========== 同步触发条件：网络在线 AND 服务器可达 AND 队列有数据 ==========
+      if (!currentNetworkConnected) {
+        debugPrint('[SyncManager] [轮询] 跳过同步：网络离线 (WiFi/移动网络未连接)');
+        return;
+      }
+
+      if (currentQueueLength == 0) {
+        debugPrint('[SyncManager] [轮询] 跳过同步：队列为空');
+        return;
+      }
+
+      // 网络已连接且队列有数据，检查服务器可达性
+      debugPrint('[SyncManager] [轮询] 网络已连接，检查服务器可达性...');
+      final isServerReachable = await _syncApiService.healthCheck();
+      debugPrint('[SyncManager] [轮询] 服务器可达性: $isServerReachable');
+
+      if (!isServerReachable) {
+        debugPrint('[SyncManager] [轮询] 跳过同步：服务器不可达 (网络已连接但服务器无响应)');
+        return;
+      }
+
+      // 所有条件满足，触发同步
+      debugPrint('[SyncManager] [轮询] 条件满足 (网络在线 + 服务器可达 + 队列有数据)，触发同步');
+      await sync();
+
+      debugPrint('[SyncManager] [轮询] ====================');
+    } catch (e) {
+      debugPrint('[SyncManager] [轮询] 检查异常: $e');
+    }
   }
 
   /// 启动定期同步
+  /// 同步条件：网络在线 AND 服务器可达 AND 队列有数据
   void _startPeriodicSync() {
     _syncTimer?.cancel();
     _syncTimer = Timer.periodic(_syncInterval, (_) async {
-      final isConnected = await _networkService.isConnected;
-      if (isConnected && !_isSyncing) {
-        debugPrint('[SyncManager] 定期同步触发');
-        await sync();
+      if (_isSyncing) return;
+
+      // 检查网络状态和队列状态（使用异步方法实时检查）
+      final isConnected = await _networkService.checkConnectivity();
+      final queueLength = _offlineQueue.queueLength;
+
+      debugPrint('[SyncManager] [定期] 检查: 网络=${isConnected ? "在线" : "离线"}, 队列=$queueLength 条');
+
+      // 同步条件：网络在线 AND 队列有数据 AND 服务器可达
+      if (!isConnected) {
+        debugPrint('[SyncManager] [定期] 跳过：网络离线');
+        return;
       }
+
+      if (queueLength == 0) {
+        debugPrint('[SyncManager] [定期] 跳过：队列为空');
+        return;
+      }
+
+      // 网络已连接且队列有数据，检查服务器可达性
+      debugPrint('[SyncManager] [定期] 检查服务器可达性...');
+      final isServerReachable = await _syncApiService.healthCheck();
+      debugPrint('[SyncManager] [定期] 服务器可达性: $isServerReachable');
+
+      if (!isServerReachable) {
+        debugPrint('[SyncManager] [定期] 跳过：服务器不可达');
+        return;
+      }
+
+      debugPrint('[SyncManager] [定期] 条件满足，触发同步');
+      await sync();
     });
     debugPrint('[SyncManager] 定期同步已启动，间隔: ${_syncInterval.inMinutes}分钟');
   }
@@ -139,66 +275,84 @@ class SyncManager {
 
   /// 手动触发同步
   Future<void> sync() async {
+    debugPrint('[SyncManager] === sync() 方法被调用 ===');
+
     if (_isSyncing) {
       debugPrint('[SyncManager] 同步已在进行中，跳过');
       return;
     }
 
-    // 检查网络连接
-    final isConnected = await _networkService.isConnected;
+    // ========== 步骤1：检查网络连接状态 ==========
+    final isConnected = await _networkService.checkConnectivity();
+    debugPrint('[SyncManager] 网络连接状态 (WiFi/移动网络): $isConnected');
     if (!isConnected) {
-      debugPrint('[SyncManager] 无网络连接，无法同步');
+      debugPrint('[SyncManager] 无网络连接 (WiFi/移动网络)，无法同步');
       _updateStatus(SyncStatus.offline);
       return;
     }
 
-    // 检查Token
+    // ========== 步骤2：检查服务器可达性（健康检查）==========
+    debugPrint('[SyncManager] 网络已连接，检查服务器可达性...');
+    final isServerReachable = await _syncApiService.healthCheck();
+    debugPrint('[SyncManager] 服务器可达性: $isServerReachable');
+
+    if (!isServerReachable) {
+      debugPrint('[SyncManager] 网络已连接但服务器不可达，可能是网络受限或服务器问题');
+      // 注意：这里不设置 offline 状态，因为网络本身是连接的
+      // 只是服务器不可达，这种情况可能是暂时的
+      return;
+    }
+
+    // ========== 步骤3：检查Token ==========
     final hasValidToken = await _authService.hasValidToken();
+    debugPrint('[SyncManager] Token有效性: $hasValidToken');
     if (!hasValidToken) {
       debugPrint('[SyncManager] 未登录或Token已过期，跳过同步');
       return;
     }
 
+    // 打印待同步队列信息
+    final pendingCount = _offlineQueue.queueLength;
+    debugPrint('[SyncManager] 开始同步，待同步操作数: $pendingCount');
+    _offlineQueue.getQueueStats().forEach((key, value) {
+      debugPrint('[SyncManager] 队列详情: $key = $value');
+    });
+
+    if (pendingCount == 0) {
+      debugPrint('[SyncManager] 队列为空，无需同步');
+      return;
+    }
+
+    // ========== 步骤4：先上传离线队列 ==========
     await _performSync();
 
-    // 增量同步：拉取后端新数据
-    await DataSyncService().syncIncremental();
+    // 再次检查队列（同步后可能被清空）
+    final remainingCount = _offlineQueue.queueLength;
+    if (remainingCount > 0) {
+      debugPrint('[SyncManager] 还有 $remainingCount 个操作未同步，继续尝试');
+    } else {
+      debugPrint('[SyncManager] 离线队列已全部同步');
+    }
+
+    // ========== 步骤5：获取本地已有记录日期 ==========
+    final localRecordDates = await DataSyncService().getLocalRecordDates();
+
+    // ========== 步骤6：增量同步（传入本地日期避免重复）==========
+    await DataSyncService().syncIncremental(localRecordDates: localRecordDates);
+
+    // 更新队列长度记录
+    _lastKnownQueueLength = _offlineQueue.queueLength;
 
     // 记录同步时间
     _lastSyncTime = DateTime.now();
-  }
-
-  /// 网络状态变化处理
-  Future<void> _onNetworkChanged(List<dynamic> results) async {
-    final isConnected = _networkService.hasConnection(results.cast());
-
-    if (isConnected) {
-      debugPrint('[SyncManager] 网络已恢复，触发同步');
-      _updateStatus(SyncStatus.idle);
-      // 延迟一下再同步，确保网络稳定
-      await Future.delayed(const Duration(seconds: 1));
-      await sync();
-    } else {
-      debugPrint('[SyncManager] 网络已断开');
-      _updateStatus(SyncStatus.offline);
-    }
-  }
-
-  /// 队列变化处理
-  void _onQueueChanged(List<dynamic> queue) {
-    // 通知UI更新
-    _progressController.add(SyncProgress(
-      synced: _syncedCount,
-      total: queue.length,
-      status: _status,
-    ));
+    debugPrint('[SyncManager] 同步完成');
   }
 
   /// 执行同步
   Future<void> _performSync() async {
     if (_isSyncing) return;
 
-    final isConnected = await _networkService.isConnected;
+    final isConnected = await _networkService.checkConnectivity();
     if (!isConnected) {
       _updateStatus(SyncStatus.offline);
       return;
@@ -224,7 +378,7 @@ class SyncManager {
       }
 
       // 通知进度
-      _progressController.add(SyncProgress(
+      _notifyProgress(SyncProgress(
         synced: 0,
         total: _totalCount,
         status: SyncStatus.syncing,
@@ -232,8 +386,8 @@ class SyncManager {
 
       // 逐个同步操作
       for (final op in pendingOps) {
-        // 检查网络
-        if (!await _networkService.isConnected) {
+        // 检查网络（使用异步方法实时检查）
+        if (!await _networkService.checkConnectivity()) {
           _updateStatus(SyncStatus.offline);
           _isSyncing = false;
           return;
@@ -245,7 +399,7 @@ class SyncManager {
           _syncedCount++;
 
           // 通知进度
-          _progressController.add(SyncProgress(
+          _notifyProgress(SyncProgress(
             synced: _syncedCount,
             total: _totalCount,
             status: SyncStatus.syncing,
@@ -275,8 +429,7 @@ class SyncManager {
 
   /// 同步单个操作
   Future<void> _syncOperation(PendingOperation op) async {
-    // 这里需要根据操作类型调用不同的API
-    // 目前是占位实现，后续根据实际API补充
+    // 根据操作类型调用不同的API
     switch (op.type) {
       case PendingOperationType.workoutRecord:
         await _syncWorkoutRecord(op);
@@ -346,8 +499,9 @@ class SyncManager {
       );
       success = result != null;
     } else {
-      // 更新进度
+      // 更新进度（传入 planId 以支持离线同步）
       final result = await _workoutApiService.updateProgress(
+        planId: planId,
         status: data['status'] as String? ?? 'inProgress',
         currentModuleIndex: data['currentModuleIndex'] as int? ?? 0,
         currentExerciseIndex: data['currentExerciseIndex'] as int? ?? 0,
@@ -369,14 +523,23 @@ class SyncManager {
   /// 更新状态
   void _updateStatus(SyncStatus newStatus) {
     _status = newStatus;
-    _statusController.add(newStatus);
+    if (_onStatusChangedCallback != null) {
+      _onStatusChangedCallback!(newStatus);
+    }
 
     // 同时更新进度状态
-    _progressController.add(SyncProgress(
+    _notifyProgress(SyncProgress(
       synced: _syncedCount,
       total: _totalCount,
       status: newStatus,
     ));
+  }
+
+  /// 通知进度变化
+  void _notifyProgress(SyncProgress progress) {
+    if (_onProgressCallback != null) {
+      _onProgressCallback!(progress);
+    }
   }
 
   /// 获取队列统计
@@ -391,11 +554,8 @@ class SyncManager {
 
   /// 释放资源
   void dispose() {
-    _syncTimer?.cancel();
-    _networkSubscription?.cancel();
-    _queueSubscription?.cancel();
-    _statusController.close();
-    _progressController.close();
+    _stopPolling();
+    stopPeriodicSync();
   }
 
   /// 获取上次同步时间

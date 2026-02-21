@@ -112,6 +112,7 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            refresh_token_expires_in=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         )
 
     async def refresh_tokens(self, refresh_token: str) -> TokenResponse:

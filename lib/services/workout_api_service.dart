@@ -46,6 +46,30 @@ class WorkoutApiService {
     }
   }
 
+  /// 获取最新的训练计划（按创建时间排序）
+  Future<WorkoutPlan?> getLatestPlan() async {
+    try {
+      final response = await _httpClient.get('/api/v1/workouts/latest');
+
+      if (response.statusCode == 404) {
+        return null;
+      }
+
+      if (!ApiHttpClient.isSuccess(response)) {
+        debugPrint('获取最新计划API错误: ${response.statusCode}');
+        return null;
+      }
+
+      final data = ApiHttpClient.parseResponse(response);
+      if (data == null) return null;
+
+      return WorkoutPlan.fromJson(data);
+    } catch (e) {
+      debugPrint('获取最新计划网络错误: $e');
+      return null;
+    }
+  }
+
   /// 应用训练计划到今日
   Future<void> applyPlan(String planId) async {
     final response = await _httpClient.post(
@@ -90,11 +114,16 @@ class WorkoutApiService {
 
     final response = await _httpClient.get('/api/v1/workouts/history?$queryString');
 
+    debugPrint('[WorkoutApiService] /history 响应状态: ${response.statusCode}');
+    debugPrint('[WorkoutApiService] /history 响应体: ${response.body}');
+
     if (!ApiHttpClient.isSuccess(response)) {
       throw Exception(ApiHttpClient.getErrorMessage(response));
     }
 
-    final dynamic data = ApiHttpClient.parseResponse(response);
+    // /history 返回的是列表，不是 Map，需要直接解析
+    final dynamic data = jsonDecode(response.body);
+    debugPrint('[WorkoutApiService] /history 返回数据: $data');
     if (data == null) return [];
 
     // 处理不同的响应格式
@@ -274,7 +303,9 @@ class WorkoutApiService {
   }
 
   /// 更新训练进度
+  /// 添加 planId 参数以支持离线同步时正确更新进度
   Future<WorkoutProgress?> updateProgress({
+    String? planId,
     String? status,
     int? currentModuleIndex,
     int? currentExerciseIndex,
@@ -283,6 +314,7 @@ class WorkoutApiService {
   }) async {
     try {
       final body = <String, dynamic>{};
+      if (planId != null) body['plan_id'] = planId;
       if (status != null) body['status'] = status;
       if (currentModuleIndex != null) body['current_module_index'] = currentModuleIndex;
       if (currentExerciseIndex != null) body['current_exercise_index'] = currentExerciseIndex;

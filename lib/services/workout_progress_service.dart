@@ -6,6 +6,8 @@ import '../models/workout.dart';
 import '../utils/user_data_helper.dart';
 import 'workout_api_service.dart';
 import 'offline_queue_service.dart';
+import 'sync_manager.dart';
+import 'network_service.dart';
 
 /// 训练进度服务 - 管理训练进度的保存和加载
 /// 支持本地持久化和后端同步，确保多设备数据一致
@@ -81,10 +83,12 @@ class WorkoutProgressService {
   Future<void> saveProgress(WorkoutProgress progress) async {
     // 1. 先保存到本地
     await _saveToLocal(progress);
+    debugPrint('[WorkoutProgressService] 进度已保存到本地: planId=${progress.planId}, status=${progress.status.name}');
 
     // 2. 同步到后端，失败时加入离线队列
     try {
       await _syncToBackend(progress);
+      debugPrint('[WorkoutProgressService] 进度同步到后端成功: planId=${progress.planId}');
     } catch (e) {
       debugPrint('[WorkoutProgressService] 同步到后端失败: $e');
       // 后端失败，加入离线队列等待后续同步
@@ -119,23 +123,34 @@ class WorkoutProgressService {
   }
 
   /// 同步进度到后端
+  /// 如果网络请求失败（返回 null），抛出异常以便触发离线队列
   Future<void> _syncToBackend(WorkoutProgress progress) async {
+    debugPrint('[WorkoutProgressService] 同步进度到后端: status=${progress.status.name}');
     // 根据状态决定调用哪个 API
     if (progress.status == WorkoutStatus.notStarted) {
       // 创建新进度
-      await _apiService.createProgress(
+      debugPrint('[WorkoutProgressService] 创建新进度: planId=${progress.planId}');
+      final result = await _apiService.createProgress(
         planId: progress.planId,
         totalExercises: progress.totalExercises,
       );
+      if (result == null) {
+        throw Exception('创建训练进度失败');
+      }
     } else {
       // 更新现有进度
-      await _apiService.updateProgress(
+      debugPrint('[WorkoutProgressService] 更新进度: planId=${progress.planId}, status=${progress.status.name}');
+      final result = await _apiService.updateProgress(
+        planId: progress.planId,
         status: progress.status.name,
         currentModuleIndex: progress.currentModuleIndex,
         currentExerciseIndex: progress.currentExerciseIndex,
         completedExerciseIds: progress.completedExerciseIds,
         actualDuration: progress.actualDuration,
       );
+      if (result == null) {
+        throw Exception('更新训练进度失败');
+      }
     }
   }
 
@@ -199,25 +214,71 @@ class WorkoutProgressService {
   }
 
   /// 完成训练
+  /// 统一处理：保存进度 + 添加训练记录到离线队列
   Future<void> completeWorkout(String planId) async {
+    debugPrint('[WorkoutProgressService] 开始完成训练: planId=$planId');
     final progress = await getTodayProgress();
 
     if (progress == null || progress.planId != planId) {
+      debugPrint('[WorkoutProgressService] 没有找到有效进度');
       return; // 没有进度可更新
     }
 
     // 计算实际训练时长
     final now = DateTime.now();
     final duration = now.difference(progress.startTime).inSeconds;
+    debugPrint('[WorkoutProgressService] 训练时长: $duration 秒');
 
     // 更新为完成状态
     final completedProgress = progress.copyWith(
       status: WorkoutStatus.completed,
       lastUpdateTime: now,
       actualDuration: duration,
+      completedExerciseIds: progress.completedExerciseIds,
     );
 
+    // 1. 保存进度（会自动加入离线队列如果后端失败）
     await saveProgress(completedProgress);
+
+    // 2. 添加训练记录到离线队列（统一在此处理，避免 Provider 重复添加）
+    final recordData = {
+      'planId': planId,
+      'completedAt': now.toIso8601String(),
+      'duration': duration,
+      'completedExercises': completedProgress.completedExerciseIds,
+      'completed': true,
+    };
+    try {
+      await OfflineQueueService().addWorkoutRecord(recordData);
+      debugPrint('[WorkoutProgressService] 训练记录已添加到离线队列');
+
+      // 3. 手动触发同步检查（立即尝试同步）
+      // 使用 await 确保同步被触发完成
+      await _triggerSync();
+    } catch (e) {
+      debugPrint('[WorkoutProgressService] 添加训练记录到离线队列失败: $e');
+    }
+    debugPrint('[WorkoutProgressService] 完成训练流程结束');
+  }
+
+  /// 手动触发同步
+  /// 如果 SyncManager 未初始化，先初始化
+  Future<void> _triggerSync() async {
+    try {
+      // 使用 SyncManager 单例直接触发同步
+      // 这样可以确保即使 SyncProvider 未初始化，也能触发同步
+      final syncManager = SyncManager();
+      // 使用 checkConnectivity() 获取实时网络状态，而不是缓存值
+      final isOnline = await NetworkService().checkConnectivity();
+      if (isOnline) {
+        debugPrint('[WorkoutProgressService] 网络在线，触发同步');
+        await syncManager.sync();
+      } else {
+        debugPrint('[WorkoutProgressService] 网络离线，同步等待网络恢复');
+      }
+    } catch (e) {
+      debugPrint('[WorkoutProgressService] 触发同步失败: $e');
+    }
   }
 
   /// 清除进度（用于测试或重置）

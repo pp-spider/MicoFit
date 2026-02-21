@@ -119,6 +119,7 @@ class WorkoutProgressCreateRequest(BaseModel):
 
 class WorkoutProgressUpdateRequest(BaseModel):
     """更新训练进度请求"""
+    plan_id: Optional[str] = None  # 支持通过 planId 指定进度（用于离线同步）
     status: Optional[str] = None
     current_module_index: Optional[int] = None
     current_exercise_index: Optional[int] = None

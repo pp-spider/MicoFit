@@ -21,6 +21,7 @@ class PendingOperation {
   final Map<String, dynamic> data; // 操作数据
   final DateTime createdAt; // 创建时间
   int retryCount; // 重试次数
+  DateTime? lastRetryTime; // 上次重试时间
 
   PendingOperation({
     required this.id,
@@ -29,6 +30,7 @@ class PendingOperation {
     required this.data,
     required this.createdAt,
     this.retryCount = 0,
+    this.lastRetryTime,
   });
 
   /// 转换为JSON存储
@@ -40,6 +42,7 @@ class PendingOperation {
       'data': data,
       'createdAt': createdAt.toIso8601String(),
       'retryCount': retryCount,
+      'lastRetryTime': lastRetryTime?.toIso8601String(),
     };
   }
 
@@ -55,6 +58,9 @@ class PendingOperation {
       data: Map<String, dynamic>.from(json['data'] as Map),
       createdAt: DateTime.parse(json['createdAt'] as String),
       retryCount: json['retryCount'] as int? ?? 0,
+      lastRetryTime: json['lastRetryTime'] != null
+          ? DateTime.parse(json['lastRetryTime'] as String)
+          : null,
     );
   }
 
@@ -86,18 +92,23 @@ class OfflineQueueService {
   // 最大待同步操作数量
   static const int _maxQueueSize = 100;
 
+  // 轮询检查间隔（毫秒）
+  static const int _pollIntervalMs = 2000; // 2秒检查一次
+
   // 待同步操作列表
   final List<PendingOperation> _queue = [];
-
-  // 流控制器
-  final StreamController<List<PendingOperation>> _queueController =
-      StreamController<List<PendingOperation>>.broadcast();
 
   // 是否正在同步
   bool _isSyncing = false;
 
   // 当前用户ID（用于数据隔离）
   String? _currentUserId;
+
+  // 轮询定时器
+  Timer? _pollTimer;
+
+  // 轮询回调
+  Function()? _onQueueChangedCallback;
 
   /// 设置当前用户ID（用户切换时调用）
   Future<void> setUserId(String userId) async {
@@ -117,8 +128,51 @@ class OfflineQueueService {
     return key;
   }
 
-  /// 获取队列流
-  Stream<List<PendingOperation>> get onQueueChanged => _queueController.stream;
+  /// 启动轮询检查队列变化
+  void startPolling({Function()? onQueueChanged}) {
+    _onQueueChangedCallback = onQueueChanged;
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(
+      Duration(milliseconds: _pollIntervalMs),
+      (_) => _checkQueueChanged(),
+    );
+    debugPrint('[OfflineQueueService] 轮询已启动，间隔: ${_pollIntervalMs}ms');
+  }
+
+  /// 停止轮询
+  void stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _onQueueChangedCallback = null;
+    debugPrint('[OfflineQueueService] 轮询已停止');
+  }
+
+  /// 检查队列是否有待同步数据（供外部轮询调用）
+  int getQueueLength() {
+    return _queue.length;
+  }
+
+  /// 内部检查队列变化并触发回调
+  void _checkQueueChanged() {
+    debugPrint('[OfflineQueueService] [轮询] 检查队列，当前长度: ${_queue.length}');
+
+    if (_queue.isNotEmpty) {
+      // 输出队列统计
+      final stats = getQueueStats();
+      final statsStr = stats.entries
+          .where((e) => e.value > 0)
+          .map((e) => '${e.key}: ${e.value}')
+          .join(', ');
+      debugPrint('[OfflineQueueService] [轮询] 队列详情: $statsStr');
+    }
+
+    if (_onQueueChangedCallback != null && _queue.isNotEmpty) {
+      debugPrint('[OfflineQueueService] [轮询] 检测到待同步数据，触发回调');
+      _onQueueChangedCallback!();
+    } else {
+      debugPrint('[OfflineQueueService] [轮询] 队列为空，跳过');
+    }
+  }
 
   /// 获取当前队列长度
   int get queueLength => _queue.length;
@@ -137,23 +191,124 @@ class OfflineQueueService {
     // 获取当前用户ID
     _currentUserId = await UserDataHelper.getCurrentUserId();
     await _loadQueueFromStorage();
-    debugPrint('[OfflineQueueService] 初始化完成，队列中有 ${_queue.length} 个待同步操作');
+    debugPrint('[OfflineQueueService] 初始化完成，待同步操作: ${_queue.length} 条');
+    _logQueueDetails();
   }
 
   /// 添加待同步操作
-  Future<void> add(PendingOperation operation) async {
+  /// 改进：如果队列满，优先保留重要操作，删除次要操作
+  /// 同时触发同步检查（如果队列从空变为非空）
+  Future<bool> add(PendingOperation operation) async {
+    final wasEmpty = _queue.isEmpty;
+
     // 检查队列是否已满
     if (isFull) {
-      debugPrint('[OfflineQueueService] 队列已满，移除最旧的操作');
-      // 移除最旧的操作
-      _queue.removeAt(0);
+      // 尝试移除已完成但未清理的操作（理论上不应该有）
+      await _cleanupCompletedOperations();
+
+      // 如果仍然满，根据操作类型决定策略
+      if (isFull) {
+        // 优先保留关键操作：训练记录、反馈、进度
+        // 可以删除次要操作：画像更新
+        final removed = _removeLowPriorityOperation(operation.type);
+        if (!removed) {
+          debugPrint('[OfflineQueueService] 队列已满且无法清理，拒绝新操作: ${operation.type.name}');
+          return false; // 返回 false 表示添加失败
+        }
+        debugPrint('[OfflineQueueService] 队列已满，移除低优先级操作以容纳新操作');
+      }
     }
 
     _queue.add(operation);
     await _saveQueueToStorage();
-    _notifyQueueChanged();
 
-    debugPrint('[OfflineQueueService] 添加操作: $operation');
+    debugPrint('[OfflineQueueService] 添加操作: ${operation.type.name} (${operation.operation})');
+    debugPrint('[OfflineQueueService] 添加后队列: ${_queue.length} 条');
+    _logQueueDetails();
+
+    // 如果队列从空变为非空，触发轮询回调
+    if (wasEmpty && _queue.isNotEmpty) {
+      _triggerSyncIfNeeded();
+    }
+
+    return true;
+  }
+
+  /// 检查队列是否有待同步数据（供外部调用）
+  bool hasPendingOperations() {
+    return _queue.isNotEmpty;
+  }
+
+  /// 触发同步（通过回调）
+  void _triggerSyncIfNeeded() {
+    debugPrint('[OfflineQueueService] 队列有新数据，触发同步检查');
+    _logQueueDetails();
+    // 轮询模式下，同步检查由 SyncManager 的轮询触发
+  }
+
+  /// 打印队列详细信息
+  void _logQueueDetails() {
+    if (_queue.isEmpty) {
+      debugPrint('[OfflineQueueService] 队列详情: (空)');
+      return;
+    }
+
+    final stats = getQueueStats();
+    final details = <String>[];
+
+    for (final entry in stats.entries) {
+      if (entry.value > 0) {
+        details.add('${entry.key}: ${entry.value}');
+      }
+    }
+
+    debugPrint('[OfflineQueueService] 队列详情: ${details.join(', ')}');
+    debugPrint('[OfflineQueueService] 队列总计: ${_queue.length} 条待同步');
+  }
+
+  /// 清理已完成的操作（从队列中移除成功的操作）
+  Future<void> _cleanupCompletedOperations() async {
+    // 实际上已完成的操作已经被移除了
+    // 这里保留接口以便将来扩展
+  }
+
+  /// 移除低优先级操作以腾出空间
+  /// 返回是否成功移除
+  bool _removeLowPriorityOperation(PendingOperationType newOpType) {
+    // 定义优先级（数字越小优先级越高）
+    const priorityMap = {
+      PendingOperationType.workoutRecord: 1,
+      PendingOperationType.feedback: 1,
+      PendingOperationType.workoutProgress: 1,
+      PendingOperationType.workoutPlan: 2,
+      PendingOperationType.chatMessage: 3,
+      PendingOperationType.profile: 4,
+    };
+
+    final newPriority = priorityMap[newOpType] ?? 5;
+
+    // 找到优先级最低的操作（数字最大的）
+    int lowestPriorityIndex = -1;
+    int lowestPriority = 0;
+
+    for (int i = 0; i < _queue.length; i++) {
+      final op = _queue[i];
+      final priority = priorityMap[op.type] ?? 5;
+
+      // 如果这个操作的优先级低于新操作，可以移除
+      if (priority > newPriority && priority > lowestPriority) {
+        lowestPriority = priority;
+        lowestPriorityIndex = i;
+      }
+    }
+
+    if (lowestPriorityIndex != -1) {
+      final removed = _queue.removeAt(lowestPriorityIndex);
+      debugPrint('[OfflineQueueService] 移除低优先级操作: ${removed.type.name}');
+      return true;
+    }
+
+    return false;
   }
 
   /// 创建训练记录待同步操作
@@ -209,15 +364,14 @@ class OfflineQueueService {
   Future<void> markAsCompleted(String operationId) async {
     _queue.removeWhere((op) => op.id == operationId);
     await _saveQueueToStorage();
-    _notifyQueueChanged();
-    debugPrint('[OfflineQueueService] 操作已完成: $operationId');
+    debugPrint('[OfflineQueueService] 同步成功，剩余队列: ${_queue.length} 条');
+    _logQueueDetails();
   }
 
   /// 清除所有已完成的操作
   Future<void> clearCompleted() async {
     _queue.clear();
     await _saveQueueToStorage();
-    _notifyQueueChanged();
     debugPrint('[OfflineQueueService] 已清除所有待同步操作');
   }
 
@@ -234,22 +388,28 @@ class OfflineQueueService {
   }
 
   /// 获取需要重试的操作
+  /// 修复：使用上次重试时间而非创建时间计算退避
   List<PendingOperation> getOperationsNeedingRetry() {
     final now = DateTime.now();
     return _queue.where((op) {
       if (!_canRetry(op)) return false;
 
       final delay = _calculateBackoffDelay(op.retryCount);
-      final lastAttempt = op.createdAt.add(Duration(milliseconds: delay));
+      // 使用上次重试时间，如果没有则使用创建时间
+      final baseTime = op.lastRetryTime ?? op.createdAt;
+      final nextAttemptTime = baseTime.add(Duration(milliseconds: delay));
 
-      return now.isAfter(lastAttempt);
+      return now.isAfter(nextAttemptTime);
     }).toList();
   }
 
-  /// 增加重试次数
+  /// 增加重试次数并记录重试时间
   void incrementRetryCount(String operationId) {
     final index = _queue.indexWhere((op) => op.id == operationId);
     if (index != -1) {
+      _queue[index].retryCount++;
+      _queue[index].lastRetryTime = DateTime.now(); // 记录重试时间
+      _saveQueueToStorage();
       _queue[index].retryCount++;
       _saveQueueToStorage();
     }
@@ -261,7 +421,6 @@ class OfflineQueueService {
     _queue.removeWhere((op) => !_canRetry(op));
     if (failed.isNotEmpty) {
       _saveQueueToStorage();
-      _notifyQueueChanged();
       debugPrint('[OfflineQueueService] 移除 ${failed.length} 个失败的操作');
     }
     return failed;
@@ -270,7 +429,6 @@ class OfflineQueueService {
   /// 设置同步状态
   void setSyncing(bool syncing) {
     _isSyncing = syncing;
-    _notifyQueueChanged();
   }
 
   /// 从本地存储加载队列（用户隔离）
@@ -312,11 +470,6 @@ class OfflineQueueService {
     }
   }
 
-  /// 通知队列变化
-  void _notifyQueueChanged() {
-    _queueController.add(List.unmodifiable(_queue));
-  }
-
   /// 获取队列统计信息
   Map<String, int> getQueueStats() {
     final stats = <String, int>{};
@@ -328,6 +481,6 @@ class OfflineQueueService {
 
   /// 释放资源
   void dispose() {
-    _queueController.close();
+    stopPolling();
   }
 }

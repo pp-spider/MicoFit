@@ -426,7 +426,7 @@ class AIService:
         plan_date: date | None = None,
     ) -> dict | None:
         """
-        获取今日计划（优先返回已应用的，否则返回最新生成的）
+        获取今日计划（返回用户最新的训练计划，如果没有今天的则返回最近创建的）
 
         Args:
             user_id: 用户ID
@@ -435,36 +435,9 @@ class AIService:
         Returns:
             dict | None: 计划数据
         """
-        # 如果没有指定日期，使用今日
         target_date = plan_date if plan_date else date.today()
 
-        # 先查询已应用的今日计划
-        result = await self.db.execute(
-            select(WorkoutPlanModel)
-            .where(
-                WorkoutPlanModel.user_id == user_id,
-                WorkoutPlanModel.plan_date == target_date,
-                WorkoutPlanModel.is_applied == True
-            )
-        )
-        plan = result.scalar_one_or_none()
-
-        if plan:
-            return {
-                "id": str(plan.id),
-                "title": plan.title,
-                "subtitle": plan.subtitle,
-                "total_duration": plan.total_duration,
-                "scene": plan.scene,
-                "rpe": plan.rpe,
-                "modules": plan.modules,
-                "ai_note": plan.ai_note,
-                "is_completed": plan.is_completed,
-                "is_applied": plan.is_applied,
-                "plan_date": plan.plan_date.isoformat(),
-            }
-
-        # 如果没有已应用的，返回最新生成的
+        # 先查询指定日期的计划
         result = await self.db.execute(
             select(WorkoutPlanModel)
             .where(
@@ -475,6 +448,16 @@ class AIService:
             .limit(1)
         )
         plan = result.scalar_one_or_none()
+
+        # 如果没有找到指定日期的计划，查询用户最新的任意一天的计划
+        if not plan:
+            result = await self.db.execute(
+                select(WorkoutPlanModel)
+                .where(WorkoutPlanModel.user_id == user_id)
+                .order_by(desc(WorkoutPlanModel.created_at))
+                .limit(1)
+            )
+            plan = result.scalar_one_or_none()
 
         if plan:
             return {

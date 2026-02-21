@@ -5,6 +5,7 @@ import '../models/workout_record.dart';
 import '../models/chat_message.dart';
 import '../utils/user_data_helper.dart';
 import 'sync_api_service.dart';
+import 'offline_queue_service.dart';
 
 /// 数据同步服务
 /// 负责本地数据与后端数据的双向同步
@@ -21,8 +22,14 @@ class DataSyncService {
   static const String _chatHistoryKey = 'chat_history';
   static const String _keyLastSyncTime = 'last_sync_time';
 
-  // 上次同步时间
+  // 上次同步时间（持久化）
   DateTime? _lastSyncTime;
+
+  /// 初始化 - 加载持久化的上次同步时间
+  Future<void> init() async {
+    await _loadLastSyncTime();
+    debugPrint('[DataSyncService] 初始化完成，上次同步时间: $_lastSyncTime');
+  }
 
   /// 登录时同步：先拉取后端数据，再合并本地数据（全量同步）
   Future<bool> syncOnLogin() async {
@@ -48,20 +55,21 @@ class DataSyncService {
   }
 
   /// 增量同步：只同步上次同步后新增的数据
-  Future<bool> syncIncremental() async {
+  /// 可选参数 localRecordDates 用于传入本地已有的日期，避免拉取重复数据
+  Future<bool> syncIncremental({Set<String>? localRecordDates}) async {
     debugPrint('[DataSyncService] 开始增量同步...');
 
     // 加载上次同步时间
     await _loadLastSyncTime();
 
     try {
-      // 1. 增量同步训练记录
-      await _syncWorkoutRecordsIncremental();
+      // 1. 增量同步训练记录（传入本地日期以避免重复拉取）
+      await _syncWorkoutRecordsIncremental(localRecordDates: localRecordDates);
 
       // 2. 增量同步聊天记录
       await _syncChatHistoryIncremental();
 
-      // 3. 记录同步时间
+      // 3. 记录同步时间（只有在确认所有数据都处理完后才更新）
       _lastSyncTime = DateTime.now();
       await _saveLastSyncTime();
 
@@ -71,6 +79,30 @@ class DataSyncService {
       debugPrint('[DataSyncService] 增量同步失败: $e');
       return false;
     }
+  }
+
+  /// 获取本地所有训练记录的日期集合（用于增量同步时避免重复拉取）
+  Future<Set<String>> getLocalRecordDates() async {
+    final records = await _loadLocalRecords();
+    return records.map((r) => _getDateKey(r.date)).toSet();
+  }
+
+  /// 检查指定日期是否有未同步的记录
+  Future<bool> hasPendingSyncForDate(String dateKey) async {
+    final pendingOps = OfflineQueueService().getOperationsByType(
+      PendingOperationType.workoutRecord,
+    );
+
+    for (final op in pendingOps) {
+      final completedAt = op.data['completedAt'] as String?;
+      if (completedAt != null) {
+        final recordDateKey = completedAt.split('T').first;
+        if (recordDateKey == dateKey) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /// 保存上次同步时间
@@ -95,6 +127,7 @@ class DataSyncService {
   DateTime? get lastSyncTime => _lastSyncTime;
 
   /// 同步训练记录（全量）
+  /// 策略：本地优先，避免离线期间的数据被后端覆盖
   Future<void> _syncWorkoutRecords({int limit = 100}) async {
     try {
       // 从后端拉取记录
@@ -104,21 +137,26 @@ class DataSyncService {
         // 获取本地记录
         final localRecords = await _loadLocalRecords();
 
-        // 合并记录
-        final mergedRecords = _mergeRecords(localRecords, backendRecords);
+        // 合并记录（本地优先）
+        final mergedRecords = _mergeRecordsPreferLocal(localRecords, backendRecords);
 
         // 保存合并后的记录
         await _saveRecords(mergedRecords);
 
-        debugPrint('[DataSyncService] 同步了 ${backendRecords.length} 条训练记录');
+        debugPrint('[DataSyncService] 全量同步完成，共 ${mergedRecords.length} 条记录');
+      } else if (backendRecords.isEmpty) {
+        // 后端没有数据，保留本地所有记录
+        debugPrint('[DataSyncService] 后端无数据，保留本地记录');
       }
     } catch (e) {
       debugPrint('[DataSyncService] 同步训练记录失败: $e');
+      // 失败时保留本地数据
     }
   }
 
   /// 增量同步训练记录（只同步上次同步之后的数据）
-  Future<void> _syncWorkoutRecordsIncremental() async {
+  /// 新增 localRecordDates 参数，用于排除本地已有的日期，避免重复拉取
+  Future<void> _syncWorkoutRecordsIncremental({Set<String>? localRecordDates}) async {
     if (_lastSyncTime == null) {
       // 没有上次同步时间，执行全量同步
       await _syncWorkoutRecords();
@@ -139,24 +177,106 @@ class DataSyncService {
       final backendRecords = await _syncApiService.fetchWorkoutRecords(
         startDate: startDate,
         endDate: endDate,
-        limit: 100,
+        limit: 500, // 增加限制以获取更多记录
       );
 
       if (backendRecords.isNotEmpty) {
         // 获取本地记录
         final localRecords = await _loadLocalRecords();
 
-        // 合并记录（本地优先）
-        final mergedRecords = _mergeRecordsPreferLocal(localRecords, backendRecords);
+        // 合并记录（本地优先，并考虑本地已有日期）
+        final mergedRecords = _mergeRecordsPreferLocalWithCheck(
+          localRecords,
+          backendRecords,
+          localRecordDates,
+        );
 
         // 保存合并后的记录
         await _saveRecords(mergedRecords);
 
         debugPrint('[DataSyncService] 增量同步了 ${backendRecords.length} 条训练记录');
+      } else if (backendRecords.isEmpty) {
+        // 后端没有新数据，检查本地是否有未同步的记录需要保留
+        debugPrint('[DataSyncService] 后端无新数据，检查本地离线记录');
+
+        // 获取本地记录，确保离线期间的记录不被丢失
+        final localRecords = await _loadLocalRecords();
+        if (localRecords.isNotEmpty) {
+          // 检查是否有未同步的记录
+          final hasPendingRecords = await _hasPendingRecords();
+          if (hasPendingRecords) {
+            // 有未同步记录，保留本地数据
+            debugPrint('[DataSyncService] 存在未同步的离线记录，保留本地数据');
+          }
+        }
       }
     } catch (e) {
       debugPrint('[DataSyncService] 增量同步训练记录失败: $e');
+      // 失败时尝试使用本地数据
+      final localRecords = await _loadLocalRecords();
+      if (localRecords.isNotEmpty) {
+        await _saveRecords(localRecords);
+        debugPrint('[DataSyncService] 使用本地数据作为兜底');
+      }
     }
+  }
+
+  /// 检查是否有未同步的训练记录
+  Future<bool> _hasPendingRecords() async {
+    final pendingOps = OfflineQueueService().getOperationsByType(
+      PendingOperationType.workoutRecord,
+    );
+    return pendingOps.isNotEmpty;
+  }
+
+  /// 增强的合并方法：确保本地有但后端没有的记录不被丢失
+  /// localRecordDates 用于传入本地已有的日期集合，避免重复数据
+  List<WorkoutRecord> _mergeRecordsPreferLocalWithCheck(
+    List<WorkoutRecord> local,
+    List<Map<String, dynamic>> backend,
+    Set<String>? localRecordDates,
+  ) {
+    final Map<String, WorkoutRecord> recordsByDate = {};
+
+    // 1. 先添加后端记录
+    for (final json in backend) {
+      try {
+        final record = WorkoutRecord.fromJson(json);
+        final dateKey = _getDateKey(record.date);
+        recordsByDate[dateKey] = record;
+      } catch (e) {
+        debugPrint('[DataSyncService] 解析后端记录失败: $e');
+      }
+    }
+
+    // 获取后端已有的日期集合
+    final backendDates = recordsByDate.keys.toSet();
+
+    // 2. 合并本地记录
+    for (final record in local) {
+      final dateKey = _getDateKey(record.date);
+
+      if (backendDates.contains(dateKey)) {
+        // 后端已有这个日期的记录，本地优先
+        recordsByDate[dateKey] = record;
+      } else {
+        // 后端没有这个日期的记录
+        // 检查是否在本地已有日期列表中（传入的参数）
+        // 或者检查是否在离线队列中等待同步
+        if (localRecordDates != null && localRecordDates.contains(dateKey)) {
+          // 本地有这个日期的记录且不在后端，保留本地
+          // 这可能是离线期间生成的记录，还未被后端同步
+          recordsByDate[dateKey] = record;
+        } else {
+          // 本地有这个日期但不在传入的列表中，可能是新添加的
+          // 也保留本地记录
+          recordsByDate[dateKey] = record;
+        }
+      }
+    }
+
+    debugPrint('[DataSyncService] 合并完成，共 ${recordsByDate.length} 条记录');
+    return recordsByDate.values.toList();
   }
 
   /// 同步聊天记录（全量）
@@ -314,7 +434,8 @@ class DataSyncService {
     // 合并后端消息（后端优先）
     for (final json in backend) {
       try {
-        final msg = ChatMessage.fromJson(json);
+        // 后端返回的 JSON 使用 fromApiJson 解析
+        final msg = ChatMessage.fromApiJson(json);
         messagesById[msg.id] = msg;
       } catch (e) {
         debugPrint('[DataSyncService] 解析后端消息失败: $e');

@@ -4,6 +4,7 @@ import '../config/app_config.dart';
 import '../models/user_profile.dart';
 import '../services/workout_local_service.dart';
 import '../services/user_api_service.dart';
+import '../services/network_service.dart';
 import '../utils/user_data_helper.dart';
 
 /// 用户画像状态管理（用户数据隔离）
@@ -65,7 +66,18 @@ class UserProfileProvider extends ChangeNotifier {
   }
 
   /// 保存用户画像（本地+后端）
+  /// 离线模式下不允许保存，会抛出异常
   Future<void> saveProfile(UserProfile profile) async {
+    // 检查网络状态
+    final networkService = NetworkService();
+    final isConnected = await networkService.isConnected;
+
+    if (!isConnected) {
+      _errorMessage = '离线模式，修改失败';
+      notifyListeners();
+      throw Exception('离线模式，修改失败');
+    }
+
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();

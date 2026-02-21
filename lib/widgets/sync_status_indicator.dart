@@ -20,7 +20,7 @@ class SyncStatusIndicator extends StatelessWidget {
 
     // 如果没有待同步内容且不在同步中，不显示
     if (syncProvider.status == SyncStatus.idle &&
-        syncProvider.totalCount == 0) {
+        syncProvider.pendingCount == 0) {
       return const SizedBox.shrink();
     }
 
@@ -39,9 +39,9 @@ class SyncStatusIndicator extends StatelessWidget {
         return _buildErrorIndicator(context, syncProvider.lastError);
 
       case SyncStatus.idle:
-        // 有待同步内容时显示小徽章
-        if (syncProvider.totalCount > 0) {
-          return _buildPendingBadge(context, syncProvider.totalCount);
+        // 有待同步内容时显示小徽章（使用正确的 pendingCount）
+        if (syncProvider.pendingCount > 0) {
+          return _buildPendingBadge(context, syncProvider.pendingCount);
         }
         return const SizedBox.shrink();
     }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 
 import 'pages/today_plan_page.dart';
@@ -21,6 +22,7 @@ import 'providers/workout_progress_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/sync_provider.dart';
+import 'services/sync_manager.dart';
 import 'utils/user_id_generator.dart';
 import 'utils/user_data_helper.dart';
 import 'models/workout_progress.dart';
@@ -73,8 +75,27 @@ void main() async {
 class MicoFitApp extends StatelessWidget {
   const MicoFitApp({super.key});
 
+  /// 确保同步服务已初始化（启动轮询）
+  void _ensureSyncInitialized() {
+    // 直接调用 SyncManager 的初始化，启动轮询
+    // 这样可以确保即使 SyncProvider 未被正确创建，轮询也能启动
+    Future.microtask(() async {
+      try {
+        debugPrint('[MicoFitApp] 确保同步服务已初始化...');
+        final syncManager = SyncManager();
+        await syncManager.init();
+        debugPrint('[MicoFitApp] 同步服务初始化完成');
+      } catch (e) {
+        debugPrint('[MicoFitApp] 同步服务初始化失败: $e');
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 确保同步服务已初始化（启动轮询）
+    _ensureSyncInitialized();
+
     return MaterialApp(
       title: '微动 MicoFit',
       debugShowCheckedModeBanner: false,
@@ -904,12 +925,29 @@ class _MainPageState extends State<MainPage> {
               userProfile: profileProvider.profile,
               onNavigate: _navigateTo,
               onReset: _handleReset,
-              onSaveGoals: (weeklyDays, timeBudget) {
-                profileProvider.updateGoals(
-                  weeklyDays: weeklyDays,
-                  timeBudget: timeBudget,
-                );
-                _showSuccessDialog('目标已保存');
+              onSaveGoals: (weeklyDays, timeBudget) async {
+                try {
+                  await profileProvider.updateGoals(
+                    weeklyDays: weeklyDays,
+                    timeBudget: timeBudget,
+                  );
+                  if (mounted) {
+                    _showSuccessDialog('目标已保存');
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text('离线模式，修改失败'),
+                        backgroundColor: Colors.red.shade400,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    );
+                  }
+                }
               },
               onLogout: _handleLogout,
             );

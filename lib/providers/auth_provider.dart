@@ -36,7 +36,9 @@ class AuthProvider extends ChangeNotifier {
   /// 初始化：尝试自动登录
   Future<void> init() async {
     _isLoading = true;
-    notifyListeners();
+
+    // 延迟通知，避免在 widget 构建过程中调用 notifyListeners
+    await Future.microtask(() {});
 
     try {
       // 检查是否有有效的 Token（使用本地存储，不需要网络）
@@ -44,9 +46,10 @@ class AuthProvider extends ChangeNotifier {
 
       if (hasValidToken) {
         // 检查 Token 是否需要刷新（可能需要网络）
+        // 使用 access token 的过期时间来判断是否需要刷新 access token
         final expiresAt = await _authService.getTokenExpiresAt();
         if (expiresAt != null && DateTime.now().add(const Duration(minutes: 5)).isAfter(expiresAt)) {
-          // Token 即将过期，尝试静默刷新
+          // Access token 即将过期，尝试静默刷新
           await _refreshTokenSilent();
         }
 
@@ -74,13 +77,15 @@ class AuthProvider extends ChangeNotifier {
         final accessToken = await _authService.getAccessToken();
         final refreshToken = await _authService.getRefreshToken();
         final expiresAtFinal = await _authService.getTokenExpiresAt();
+        final refreshTokenExpiresAt = await _authService.getRefreshTokenExpiresAt();
 
-        if (accessToken != null && refreshToken != null && expiresAtFinal != null) {
+        if (accessToken != null && refreshToken != null && expiresAtFinal != null && refreshTokenExpiresAt != null) {
           _tokens = AuthTokens(
             accessToken: accessToken,
             refreshToken: refreshToken,
             tokenType: 'bearer',
             expiresIn: expiresAtFinal.difference(DateTime.now()).inSeconds,
+            refreshTokenExpiresIn: refreshTokenExpiresAt.difference(DateTime.now()).inSeconds,
           );
         }
 

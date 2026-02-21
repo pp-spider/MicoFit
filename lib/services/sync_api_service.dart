@@ -13,15 +13,25 @@ class SyncApiService {
   /// 同步训练记录
   Future<bool> syncWorkoutRecord(Map<String, dynamic> recordData) async {
     try {
+      // 兼容 camelCase 和 snake_case 两种格式
+      final planId = recordData['planId'] ?? recordData['plan_id'];
+      final completedAt = recordData['completedAt'] ?? recordData['completed_at'];
+      final duration = recordData['duration'] ?? recordData['duration'];
+      final completedExercises = recordData['completedExercises'] ??
+          recordData['completed_exercises'] ??
+          [];
+
       final request = {
-        'plan_id': recordData['planId'],
-        'completed_at': recordData['completedAt'],
-        'duration': recordData['duration'],
-        'completed_exercises': recordData['completedExercises'] ?? [],
+        'plan_id': planId,
+        'completed_at': completedAt,
+        'duration': duration,
+        'completed_exercises': completedExercises,
       };
 
+      debugPrint('[SyncApiService] 同步训练记录: planId=$planId, completedAt=$completedAt, duration=$duration');
+
       final response = await _httpClient.post(
-        '/sync/workout-records',
+        '/api/v1/sync/workout-records',
         body: jsonEncode([request]),
       );
 
@@ -42,14 +52,17 @@ class SyncApiService {
   Future<SyncResult> syncWorkoutRecords(List<Map<String, dynamic>> records) async {
     try {
       final requests = records.map((record) => {
-        'plan_id': record['planId'],
-        'completed_at': record['completedAt'],
-        'duration': record['duration'],
-        'completed_exercises': record['completedExercises'] ?? [],
+        // 兼容 camelCase 和 snake_case 两种格式
+        'plan_id': record['planId'] ?? record['plan_id'],
+        'completed_at': record['completedAt'] ?? record['completed_at'],
+        'duration': record['duration'] ?? record['duration'],
+        'completed_exercises': record['completedExercises'] ??
+            record['completed_exercises'] ??
+            [],
       }).toList();
 
       final response = await _httpClient.post(
-        '/sync/workout-records',
+        '/api/v1/sync/workout-records',
         body: jsonEncode(requests),
       );
 
@@ -75,18 +88,18 @@ class SyncApiService {
   Future<bool> syncFeedback(Map<String, dynamic> feedbackData) async {
     try {
       final request = {
-        'plan_id': feedbackData['planId'],
-        'record_date': feedbackData['recordDate'],
+        'plan_id': feedbackData['plan_id'],
+        'record_date': feedbackData['record_date'],
         'duration': feedbackData['duration'],
         'completion': feedbackData['completion'],
         'feeling': feedbackData['feeling'],
         'tomorrow': feedbackData['tomorrow'],
-        'pain_locations': feedbackData['painLocations'] ?? [],
+        'pain_locations': feedbackData['pain_locations'] ?? [],
         'completed': feedbackData['completed'] ?? true,
       };
 
       final response = await _httpClient.post(
-        '/sync/feedback',
+        '/api/v1/sync/feedback',
         body: jsonEncode(request),
       );
 
@@ -121,7 +134,7 @@ class SyncApiService {
       request.removeWhere((key, value) => value == null);
 
       final response = await _httpClient.post(
-        '/sync/profile',
+        '/api/v1/sync/profile',
         body: jsonEncode(request),
       );
 
@@ -142,7 +155,7 @@ class SyncApiService {
   Future<bool> syncCompletePlan(String planId) async {
     try {
       final response = await _httpClient.post(
-        '/sync/complete-plan/$planId',
+        '/api/v1/sync/complete-plan/$planId',
       );
 
       if (ApiHttpClient.isSuccess(response)) {
@@ -188,7 +201,8 @@ class SyncApiService {
         debugPrint('[SyncApiService] 拉取训练记录成功: ${records.length} 条');
         return records.cast<Map<String, dynamic>>();
       } else {
-        debugPrint('[SyncApiService] 拉取训练记录失败');
+        final errorMsg = ApiHttpClient.getErrorMessage(response);
+        debugPrint('[SyncApiService] 拉取训练记录失败: 状态码=${response.statusCode}, 信息=$errorMsg');
         return [];
       }
     } catch (e) {
@@ -202,7 +216,7 @@ class SyncApiService {
     int limit = 50,
   }) async {
     try {
-      final response = await _httpClient.get('/api/v1/chat/messages?limit=$limit');
+      final response = await _httpClient.get('/api/v1/ai/chat/messages?limit=$limit');
 
       if (ApiHttpClient.isSuccess(response)) {
         final data = ApiHttpClient.parseResponse(response);
@@ -210,7 +224,8 @@ class SyncApiService {
         debugPrint('[SyncApiService] 拉取聊天历史成功: ${messages.length} 条');
         return messages.cast<Map<String, dynamic>>();
       } else {
-        debugPrint('[SyncApiService] 拉取聊天历史失败');
+        final errorMsg = ApiHttpClient.getErrorMessage(response);
+        debugPrint('[SyncApiService] 拉取聊天历史失败: 状态码=${response.statusCode}, 信息=$errorMsg');
         return [];
       }
     } catch (e) {
@@ -229,12 +244,42 @@ class SyncApiService {
         debugPrint('[SyncApiService] 拉取月度统计成功');
         return data;
       } else {
-        debugPrint('[SyncApiService] 拉取月度统计失败');
+        final errorMsg = ApiHttpClient.getErrorMessage(response);
+        debugPrint('[SyncApiService] 拉取月度统计失败: 状态码=${response.statusCode}, 信息=$errorMsg');
         return null;
       }
     } catch (e) {
       debugPrint('[SyncApiService] 拉取月度统计异常: $e');
       return null;
+    }
+  }
+
+  /// 健康检查 - 验证服务器是否可达
+  /// 返回 true 表示服务器可达，false 表示服务器不可达
+  Future<bool> healthCheck() async {
+    try {
+      // 使用一个轻量级的 API 调用来验证服务器可达性
+      // 这里调用用户信息的接口（不需要特殊权限）
+      final response = await _httpClient.get('/api/v1/users/me').timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          debugPrint('[SyncApiService] 健康检查超时');
+          throw Exception('健康检查超时');
+        },
+      );
+
+      // 无论返回成功还是认证失败，只要能收到 HTTP 响应就说明服务器可达
+      // 认证失败 (401) 也是一种可达的证明
+      if (response.statusCode == 200 || response.statusCode == 401) {
+        debugPrint('[SyncApiService] 健康检查通过: 服务器可达 (状态码: ${response.statusCode})');
+        return true;
+      }
+
+      debugPrint('[SyncApiService] 健康检查失败: 状态码=${response.statusCode}');
+      return false;
+    } catch (e) {
+      debugPrint('[SyncApiService] 健康检查失败: $e');
+      return false;
     }
   }
 }

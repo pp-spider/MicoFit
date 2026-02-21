@@ -21,6 +21,7 @@ class TokenResponse(BaseModel):
     refresh_token: str = Field(..., description="刷新令牌")
     token_type: str = Field(default="bearer", description="令牌类型")
     expires_in: int = Field(..., description="访问令牌过期时间（秒）")
+    refresh_token_expires_in: int = Field(..., description="刷新令牌过期时间（秒）")
 
 
 class RefreshTokenRequest(BaseModel):

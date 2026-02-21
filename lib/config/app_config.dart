@@ -6,13 +6,14 @@ class AppConfig {
   // API 配置
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.5.8:8000',
+    defaultValue: 'http://192.168.5.14:8000',
   );
 
   // Token 存储 Key
   static const String keyAccessToken = 'micofit_access_token';
   static const String keyRefreshToken = 'micofit_refresh_token';
   static const String keyTokenExpiresAt = 'micofit_token_expires_at';
+  static const String keyRefreshTokenExpiresAt = 'micofit_refresh_token_expires_at';
   static const String keyUserId = 'micofit_user_id';
 
   // 本地数据存储Key

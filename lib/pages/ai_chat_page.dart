@@ -6,6 +6,7 @@ import '../models/exercise.dart';
 import '../models/workout.dart';
 import '../widgets/bottom_nav.dart';
 import '../providers/chat_provider.dart';
+import '../services/network_service.dart';
 import 'chat_sessions_page.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -283,34 +284,116 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    // 离线模式检测
+    final networkService = NetworkService();
+
+    return FutureBuilder<bool>(
+      future: networkService.isConnectedAsync(),
+      builder: (context, snapshot) {
+        final isOffline = snapshot.data == false;
+
+        if (isOffline) {
+          return _buildOfflineState();
+        }
+
+        return Scaffold(
+          backgroundColor: const Color(0xFFF5F5F0),
+          body: Stack(
+            children: [
+              // 背景装饰
+              _buildBackgroundDecoration(),
+
+              SafeArea(
+                child: Column(
+                  children: [
+                    // 顶部标题栏
+                    _buildHeader(),
+                    // Messages List
+                    Expanded(
+                      child: _buildChatArea(),
+                    ),
+
+                    // Quick Questions (仅当消息很少时显示)
+                    _buildQuickQuestions(),
+
+                    // Input Area
+                    _buildInputArea(),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          // Bottom Navigation
+          bottomNavigationBar: BottomNav(
+            currentPage: 'ai',
+            onNavigate: widget.onNavigate,
+          ),
+        );
+      },
+    );
+  }
+
+  /// 离线状态提示
+  Widget _buildOfflineState() {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F0),
-      body: Stack(
-        children: [
-          // 背景装饰
-          _buildBackgroundDecoration(),
-
-          SafeArea(
-            child: Column(
-              children: [
-                // 顶部标题栏
-                _buildHeader(),
-                // Messages List
-                Expanded(
-                  child: _buildChatArea(),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  shape: BoxShape.circle,
                 ),
-
-                // Quick Questions (仅当消息很少时显示)
-                _buildQuickQuestions(),
-
-                // Input Area
-                _buildInputArea(),
-              ],
-            ),
+                child: Icon(
+                  Icons.cloud_off_rounded,
+                  size: 64,
+                  color: Colors.orange.shade400,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'AI 教练暂不可用',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'AI 聊天功能需要联网使用\n请检查网络连接后重试',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 15,
+                  color: Colors.grey.shade600,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                onPressed: () {
+                  widget.onNavigate('today');
+                },
+                icon: const Icon(Icons.home_rounded),
+                label: const Text('返回首页'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2DD4BF),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
-      // Bottom Navigation
       bottomNavigationBar: BottomNav(
         currentPage: 'ai',
         onNavigate: widget.onNavigate,

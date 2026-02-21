@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -117,6 +118,32 @@ async def complete_plan(
     }
 
 
+@router.get("/latest", response_model=Optional[WorkoutPlanSchema])
+async def get_latest_plan(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取最新的训练计划（按创建时间排序）
+
+    返回用户最近一次创建的训练计划
+    """
+    from app.models.workout_plan import WorkoutPlan
+
+    result = await db.execute(
+        select(WorkoutPlan)
+        .where(WorkoutPlan.user_id == str(current_user.id))
+        .order_by(desc(WorkoutPlan.created_at))
+        .limit(1)
+    )
+    plan = result.scalar_one_or_none()
+
+    if plan:
+        return plan
+
+    return None
+
+
 @router.get("/history", response_model=list[WorkoutPlanSchema])
 async def get_plan_history(
     start_date: Optional[date] = Query(None, description="开始日期"),
@@ -141,27 +168,6 @@ async def get_plan_history(
     return plans
 
 
-@router.get("/{plan_id}", response_model=WorkoutPlanSchema)
-async def get_plan(
-    plan_id: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    获取指定训练计划的详情
-    """
-    service = WorkoutService(db)
-    plan = await service.get_plan_by_id(plan_id)
-
-    if not plan or str(plan.user_id) != str(current_user.id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="计划不存在或无权访问"
-        )
-
-    return plan
-
-
 @router.get("/records")
 async def get_workout_records(
     start_date: Optional[date] = Query(None, description="开始日期 (YYYY-MM-DD)"),
@@ -183,6 +189,27 @@ async def get_workout_records(
     )
 
     return {"records": records}
+
+
+@router.get("/{plan_id}", response_model=WorkoutPlanSchema)
+async def get_plan(
+    plan_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取指定训练计划的详情
+    """
+    service = WorkoutService(db)
+    plan = await service.get_plan_by_id(plan_id)
+
+    if not plan or str(plan.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="计划不存在或无权访问"
+        )
+
+    return plan
 
 
 @router.get("/stats/monthly")
@@ -209,7 +236,7 @@ async def get_monthly_stats(
 
 # ========== 训练进度 API ==========
 
-@router.get("/progress/today", response_model=WorkoutProgressSchema)
+@router.get("/progress/today", response_model=Optional[WorkoutProgressSchema])
 async def get_today_progress(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -217,7 +244,7 @@ async def get_today_progress(
     """
     获取今日训练进度
 
-    返回今天的训练进度（如果有）
+    返回今天的训练进度（如果有），没有则返回 null
     """
     from sqlalchemy import select
     from datetime import date
@@ -231,9 +258,7 @@ async def get_today_progress(
     )
     progress = result.scalar_one_or_none()
 
-    if progress:
-        return progress
-    return None
+    return progress
 
 
 @router.post("/progress", response_model=WorkoutProgressResponse)
@@ -291,23 +316,40 @@ async def update_progress(
     更新训练进度
 
     在训练过程中实时更新进度
+    支持通过 plan_id 定位进度（用于离线同步）
     """
     from datetime import date
     from sqlalchemy import select
 
     today = date.today().strftime("%Y-%m-%d")
 
-    result = await db.execute(
-        select(WorkoutProgress)
-        .where(WorkoutProgress.user_id == str(current_user.id))
-        .where(WorkoutProgress.date_key == today)
-    )
+    # 支持通过 plan_id 定位进度（同时限制 date_key 为今天，避免返回多条记录）
+    if request.plan_id:
+        result = await db.execute(
+            select(WorkoutProgress)
+            .where(WorkoutProgress.user_id == str(current_user.id))
+            .where(WorkoutProgress.plan_id == request.plan_id)
+            .where(WorkoutProgress.date_key == today)
+        )
+    else:
+        # 默认查找今天的进度
+        result = await db.execute(
+            select(WorkoutProgress)
+            .where(WorkoutProgress.user_id == str(current_user.id))
+            .where(WorkoutProgress.date_key == today)
+        )
     progress = result.scalar_one_or_none()
 
     if not progress:
-        return WorkoutProgressResponse(
-            success=False,
-            error="未找到今日训练进度"
+        # 如果指定了 plan_id 但没找到，返回 404 错误
+        if request.plan_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"未找到计划 {request.plan_id} 的训练进度"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="未找到今日训练进度"
         )
 
     # 更新字段

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import '../models/exercise.dart';
 import '../models/user_profile.dart';
+import '../models/workout.dart';
+import '../services/workout_api_service.dart';
 import '../widgets/bottom_nav.dart';
 
 /// 个人资料页面
@@ -28,6 +31,11 @@ class _ProfilePageState extends State<ProfilePage> {
   late int _weeklyDays;
   late int _timeBudget;
 
+  // 历史训练计划
+  final WorkoutApiService _workoutApiService = WorkoutApiService();
+  List<WorkoutPlan> _historyPlans = [];
+  bool _isLoadingHistory = false;
+
   @override
   void initState() {
     super.initState();
@@ -37,6 +45,27 @@ class _ProfilePageState extends State<ProfilePage> {
     } else {
       _weeklyDays = 3;
       _timeBudget = 12;
+    }
+    _loadHistoryPlans();
+  }
+
+  // 加载历史训练计划
+  Future<void> _loadHistoryPlans() async {
+    setState(() => _isLoadingHistory = true);
+    try {
+      final plans = await _workoutApiService.getHistoryPlans(limit: 20);
+      debugPrint('[ProfilePage] 加载历史计划成功: ${plans.length} 条');
+      if (mounted) {
+        setState(() {
+          _historyPlans = plans;
+          _isLoadingHistory = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[ProfilePage] 加载历史计划失败: $e');
+      if (mounted) {
+        setState(() => _isLoadingHistory = false);
+      }
     }
   }
 
@@ -93,6 +122,339 @@ class _ProfilePageState extends State<ProfilePage> {
         Navigator.pop(context);
       }
     });
+  }
+
+  // 显示计划详情弹窗（使用与AI聊天页面相同的UI风格）
+  void _showPlanDetailDialog(WorkoutPlan plan) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.85,
+        decoration: const BoxDecoration(
+          color: Color(0xFFF5F5F0),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            // 拖动条
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            // 标题栏
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _buildPlanHeader(plan),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            // 计划统计信息
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _buildPlanStats(plan),
+            ),
+            const SizedBox(height: 12),
+            // 计划详情列表
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: plan.modules.length,
+                itemBuilder: (context, index) {
+                  final module = plan.modules[index];
+                  return _buildModuleDetail(module, index + 1);
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 计划标题（与AI聊天页面相同）
+  Widget _buildPlanHeader(WorkoutPlan plan) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF2DD4BF),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: const Text(
+            '训练计划',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            plan.title,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF115E59),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 计划统计信息（与AI聊天页面相同）
+  Widget _buildPlanStats(WorkoutPlan plan) {
+    return Row(
+      children: [
+        _buildPlanStatItem(Icons.access_time, '${plan.totalDuration}分钟'),
+        const SizedBox(width: 16),
+        _buildPlanStatItem(Icons.fitness_center, 'RPE ${plan.rpe}'),
+        const SizedBox(width: 16),
+        _buildPlanStatItem(Icons.location_on, plan.scene),
+      ],
+    );
+  }
+
+  Widget _buildPlanStatItem(IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: const Color(0xFF115E59)),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Color(0xFF115E59),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 模块详细内容（与AI聊天页面相同）
+  Widget _buildModuleDetail(WorkoutModule module, int moduleNumber) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF2DD4BF).withValues(alpha: 0.2),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2DD4BF).withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '模块 $moduleNumber',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF115E59),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  module.name,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF115E59),
+                  ),
+                ),
+              ),
+              Text(
+                '${module.duration}分钟',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...module.exercises.asMap().entries.map((entry) {
+            final exIndex = entry.key;
+            final exercise = entry.value;
+            return _buildExerciseDetail(exercise, exIndex + 1);
+          }),
+        ],
+      ),
+    );
+  }
+
+  // 动作详细卡片（与AI聊天页面相同）
+  Widget _buildExerciseDetail(Exercise exercise, int exerciseNumber) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F5F0),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2DD4BF).withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Center(
+                  child: Text(
+                    '$exerciseNumber',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF115E59),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  exercise.name,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF115E59),
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2DD4BF).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '${exercise.duration}秒',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF115E59),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (exercise.description.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.description_outlined, size: 14, color: Colors.grey[600]),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    exercise.description,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (exercise.steps.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.format_list_numbered, size: 14, color: Colors.grey[600]),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '步骤: ${exercise.steps.join(' → ')}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (exercise.tips.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.lightbulb_outline, size: 14, color: Colors.grey[600]),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    exercise.tips,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (exercise.breathing.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.air, size: 14, color: Colors.grey[600]),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '呼吸: ${exercise.breathing}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   // 显示退出登录确认对话框
@@ -437,6 +799,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
                     const SizedBox(height: 24),
 
+                    // 历史训练计划卡片（放在修改个人信息之前）
+                    _buildHistoryPlansCard(),
+
+                    const SizedBox(height: 16),
+
                     // Actions
                     _buildActionButton(
                       icon: Icons.edit,
@@ -445,6 +812,8 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
 
                     const SizedBox(height: 12),
+
+                    const SizedBox(height: 16),
 
                     // 退出登录按钮
                     if (widget.onLogout != null)
@@ -756,5 +1125,150 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       ),
     );
+  }
+
+  // 构建历史训练计划卡片
+  Widget _buildHistoryPlansCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2DD4BF).withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.history, color: Color(0xFF2DD4BF), size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                '历史训练计划',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF115E59),
+                  fontSize: 16,
+                ),
+              ),
+              const Spacer(),
+              if (_isLoadingHistory)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          if (_historyPlans.isEmpty && !_isLoadingHistory)
+            Container(
+              padding: const EdgeInsets.all(24),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.fitness_center, size: 40, color: Colors.grey[300]),
+                    const SizedBox(height: 8),
+                    Text(
+                      '暂无历史训练计划',
+                      style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            SizedBox(
+              height: 235, // 固定高度，可完整展示3条记录
+              child: ListView.separated(
+                shrinkWrap: true,
+                physics: const ClampingScrollPhysics(),
+                itemCount: _historyPlans.length,
+                separatorBuilder: (context, index) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final plan = _historyPlans[index];
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    onTap: () => _showPlanDetailDialog(plan),
+                    leading: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: plan.isCompleted
+                            ? const Color(0xFF10B981).withValues(alpha: 0.1)
+                            : const Color(0xFFF59E0B).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        plan.isCompleted ? Icons.check_circle : Icons.play_circle_outline,
+                        color: plan.isCompleted
+                            ? const Color(0xFF10B981)
+                            : const Color(0xFFF59E0B),
+                        size: 20,
+                      ),
+                    ),
+                    title: Text(
+                      plan.title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF115E59),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      '${plan.totalDuration}分钟 · ${plan.scene}',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _formatDate(plan.planDate ?? DateTime.now()),
+                          style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.chevron_right, size: 18, color: Colors.grey[400]),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // 格式化日期
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final diff = now.difference(date);
+
+    if (diff.inDays == 0) {
+      return '今天';
+    } else if (diff.inDays == 1) {
+      return '昨天';
+    } else if (diff.inDays < 7) {
+      return '${diff.inDays}天前';
+    } else {
+      return '${date.month}/${date.day}';
+    }
   }
 }
