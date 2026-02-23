@@ -120,6 +120,13 @@ class OfflineQueueService {
     }
   }
 
+  /// 清除当前用户ID（登出时调用）
+  void clearUserId() {
+    _currentUserId = null;
+    _queue.clear();
+    debugPrint('[OfflineQueueService] 已清除用户ID和队列数据');
+  }
+
   /// 获取当前用户隔离的存储键
   String _getUserKey(String key) {
     if (_currentUserId != null && _currentUserId!.isNotEmpty) {

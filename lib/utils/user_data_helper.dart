@@ -37,12 +37,12 @@ class UserDataHelper {
   }
 
   /// 构建用户隔离的存储key
-  /// 格式: user_{userId}_{key}
+  /// 格式: user_{userId}_{key} 或 anonymous_{key}（未登录时）
   static Future<String> buildUserKey(String key) async {
     final userId = await getCurrentUserId();
     if (userId == null || userId.isEmpty) {
-      // 未登录时使用默认key
-      return key;
+      // 未登录时使用匿名用户前缀，避免数据被其他用户共享
+      return 'anonymous_$key';
     }
     return 'user_${userId}_$key';
   }

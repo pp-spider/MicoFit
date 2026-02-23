@@ -447,6 +447,175 @@ class ContextService:
 
         return memory
 
+    async def get_session_memory_detail(
+        self,
+        session_id: str
+    ) -> Dict[str, Any]:
+        """
+        获取指定会话的详细记忆信息
+
+        Args:
+            session_id: 会话ID
+
+        Returns:
+            Dict 包含会话的详细记忆
+        """
+        # 获取会话
+        session_result = await self.db.execute(
+            select(ChatSession).where(ChatSession.id == session_id)
+        )
+        session = session_result.scalar_one_or_none()
+
+        if not session:
+            return {
+                "exists": False,
+                "session_id": session_id,
+            }
+
+        # 获取消息统计
+        messages_result = await self.db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.created_at)
+        )
+        messages = messages_result.scalars().all()
+
+        # 分类统计
+        user_messages = [m for m in messages if m.role == "user"]
+        assistant_messages = [m for m in messages if m.role == "assistant"]
+        workout_plans = [m for m in messages if m.data_type == "workout_plan"]
+
+        return {
+            "exists": True,
+            "session_id": session_id,
+            "user_id": session.user_id,
+            "title": session.title,
+            "created_at": session.created_at.isoformat() if session.created_at else None,
+            "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+            "message_count": session.message_count,
+            "context_summary": session.context_summary,
+            "stats": {
+                "total_messages": len(messages),
+                "user_messages": len(user_messages),
+                "assistant_messages": len(assistant_messages),
+                "workout_plans": len(workout_plans),
+            },
+            "recent_messages": [
+                {
+                    "role": m.role,
+                    "content": m.content[:100] + "..." if len(m.content) > 100 else m.content,
+                    "data_type": m.data_type,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in messages[-10:]  # 最近10条
+            ],
+        }
+
+    async def get_multi_session_summaries(
+        self,
+        user_id: str,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        获取用户多个会话的摘要列表
+
+        用于展示会话历史和快速切换
+
+        Args:
+            user_id: 用户ID
+            limit: 返回的会话数量
+
+        Returns:
+            List[Dict] 会话摘要列表
+        """
+        result = await self.db.execute(
+            select(ChatSession)
+            .where(ChatSession.user_id == user_id)
+            .order_by(desc(ChatSession.updated_at))
+            .limit(limit)
+        )
+        sessions = result.scalars().all()
+
+        summaries = []
+        for session in sessions:
+            summaries.append({
+                "id": session.id,
+                "title": session.title,
+                "context_summary": session.context_summary,
+                "message_count": session.message_count,
+                "created_at": session.created_at.isoformat() if session.created_at else None,
+                "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+            })
+
+        return summaries
+
+    async def extract_key_info_from_session(
+        self,
+        session_id: str
+    ) -> Dict[str, Any]:
+        """
+        从会话中提取关键信息
+
+        用于构建用户画像和个性化推荐
+
+        Args:
+            session_id: 会话ID
+
+        Returns:
+            Dict 包含提取的关键信息
+        """
+        messages_result = await self.db.execute(
+            select(ChatMessage)
+            .where(
+                and_(
+                    ChatMessage.session_id == session_id,
+                    ChatMessage.role.in_(["user", "assistant"])
+                )
+            )
+            .order_by(ChatMessage.created_at)
+        )
+        messages = messages_result.scalars().all()
+
+        # 提取关键信息
+        key_info = {
+            "topics_discussed": [],
+            "goals_mentioned": [],
+            "workout_plans": [],
+            "questions_asked": [],
+        }
+
+        # 关键词列表
+        topic_keywords = ["训练", "健身", "运动", "锻炼", "减脂", "增肌", "力量", "有氧", "拉伸"]
+        goal_keywords = ["减肥", "减脂", "增肌", "塑形", "体能", "健康", "力量", "耐力"]
+
+        user_contents = [m.content for m in messages if m.role == "user"]
+        assistant_contents = [m.content for m in messages if m.role == "assistant"]
+
+        # 统计关键词出现
+        for content in user_contents + assistant_contents:
+            for topic in topic_keywords:
+                if topic in content and topic not in key_info["topics_discussed"]:
+                    key_info["topics_discussed"].append(topic)
+
+            for goal in goal_keywords:
+                if goal in content and goal not in key_info["goals_mentioned"]:
+                    key_info["goals_mentioned"].append(goal)
+
+        # 收集生成的计划
+        for msg in messages:
+            if msg.data_type == "workout_plan" and msg.structured_data:
+                key_info["workout_plans"].append({
+                    "title": msg.structured_data.get("title", ""),
+                    "scene": msg.structured_data.get("scene", ""),
+                })
+
+        # 收集用户问题
+        for content in user_contents:
+            if any(q in content for q in ["怎么", "如何", "能不能", "可以", "为什么", "什么"]):
+                key_info["questions_asked"].append(content[:50] + "...")
+
+        return key_info
+
     async def update_session_title_from_first_message(
         self,
         session_id: str,

@@ -145,4 +145,11 @@ class WorkoutProvider extends ChangeNotifier {
       return [];
     }
   }
+
+  /// 清除今日训练计划（用户切换时调用）
+  void clearTodayWorkout() {
+    _todayWorkout = null;
+    _errorMessage = null;
+    notifyListeners();
+  }
 }

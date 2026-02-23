@@ -124,10 +124,24 @@ class WorkoutProgressProvider extends ChangeNotifier {
     }
   }
 
-  /// 清除进度
+  /// 清除进度（会同时删除后端数据，谨慎使用）
   Future<void> clearProgress() async {
     try {
       await _service.clearProgress();
+      _progress = null;
+      _errorMessage = null;
+      notifyListeners();
+    } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
+    }
+  }
+
+  /// 仅清除内存中的进度数据，不删除后端数据
+  /// 用于用户切换时防止看到旧数据
+  Future<void> clearMemoryOnly() async {
+    try {
+      await _service.clearMemoryOnly();
       _progress = null;
       _errorMessage = null;
       notifyListeners();

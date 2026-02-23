@@ -3,6 +3,7 @@ import '../models/user.dart';
 import '../models/auth_tokens.dart';
 import '../services/auth_api_service.dart';
 import '../services/data_sync_service.dart';
+import '../services/offline_queue_service.dart';
 import '../utils/user_data_helper.dart';
 
 /// 认证状态管理
@@ -71,6 +72,8 @@ class AuthProvider extends ChangeNotifier {
         // 设置用户数据隔离的当前用户ID
         if (_user != null) {
           UserDataHelper.setCurrentUserId(_user!.id);
+          // 初始化离线队列（使用用户ID）
+          await OfflineQueueService().init();
         }
 
         // 读取存储的 Token 信息
@@ -132,6 +135,8 @@ class AuthProvider extends ChangeNotifier {
       // 设置用户数据隔离的当前用户ID
       if (_user != null) {
         UserDataHelper.setCurrentUserId(_user!.id);
+        // 初始化离线队列（使用新用户ID）
+        await OfflineQueueService().init();
       }
 
       _errorMessage = null;
@@ -165,6 +170,8 @@ class AuthProvider extends ChangeNotifier {
       // 设置用户数据隔离的当前用户ID
       if (_user != null) {
         UserDataHelper.setCurrentUserId(_user!.id);
+        // 初始化离线队列（使用新用户ID）
+        await OfflineQueueService().init();
       }
 
       _isNewLogin = true; // 标记为新登录
@@ -197,6 +204,8 @@ class AuthProvider extends ChangeNotifier {
       await UserDataHelper.clearCurrentUserData();
       // 清除用户数据隔离的当前用户ID
       UserDataHelper.clearCurrentUserId();
+      // 清除离线队列的用户ID和队列数据
+      OfflineQueueService().clearUserId();
       _user = null;
       _tokens = null;
       _isOfflineMode = false;

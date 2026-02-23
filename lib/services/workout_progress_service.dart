@@ -282,6 +282,7 @@ class WorkoutProgressService {
   }
 
   /// 清除进度（用于测试或重置）
+  /// 会同时删除后端数据，请谨慎使用
   Future<void> clearProgress() async {
     await UserDataHelper.remove(_keyProgress);
 
@@ -291,6 +292,13 @@ class WorkoutProgressService {
     } catch (e) {
       debugPrint('[WorkoutProgressService] 清除后端进度失败: $e');
     }
+  }
+
+  /// 仅清除本地内存和缓存，不删除后端数据
+  /// 用于用户切换时防止看到旧数据
+  Future<void> clearMemoryOnly() async {
+    await UserDataHelper.remove(_keyProgress);
+    debugPrint('[WorkoutProgressService] 已清除本地进度缓存');
   }
 
   /// 重置今日进度（用于重新开始训练）

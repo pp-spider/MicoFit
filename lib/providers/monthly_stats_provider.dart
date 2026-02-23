@@ -200,4 +200,11 @@ class MonthlyStatsProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// 清除月度统计数据（用户切换时调用）
+  void clearStats() {
+    _monthlyStats = null;
+    _errorMessage = null;
+    notifyListeners();
+  }
 }

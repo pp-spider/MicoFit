@@ -1,12 +1,15 @@
 """AI API 端点 - 流式聊天"""
 import json
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
 from sse_starlette.sse import EventSourceResponse
 
 from app.db.session import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
+from app.models.chat_session import ChatMessage
 from app.services.ai_service import AIService
 from app.services.context_service import ContextService
 from app.schemas.chat import ChatStreamRequest, ChatStreamChunk, ChatContinueRequest
@@ -285,3 +288,367 @@ async def get_chat_messages(
     all_messages.sort(key=lambda x: x["created_at"] or "")
 
     return {"messages": all_messages}
+
+
+@router.get("/chat/sessions/{session_id}/memory")
+async def get_session_memory(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取会话的完整记忆信息
+
+    包括：
+    - 会话元数据（标题、创建时间、消息数）
+    - 上下文摘要
+    - 最近的消息历史（用于前端恢复对话）
+    - 预估的token数
+    """
+    from app.services.chat_service import ChatService
+
+    # 验证会话归属
+    chat_service = ChatService(db)
+    session = await chat_service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    # 获取上下文和消息
+    context_service = ContextService(db)
+    context = await context_service.get_context_for_chat(session_id=session_id)
+    messages = await chat_service.get_session_messages(session_id, limit=50)
+
+    # 构建消息列表（包含角色和内容）
+    message_history = [
+        {
+            "id": str(msg.id),
+            "role": msg.role,
+            "content": msg.content,
+            "data_type": msg.data_type,
+            "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        }
+        for msg in messages
+    ]
+
+    return {
+        "session": {
+            "id": str(session.id),
+            "title": session.title,
+            "created_at": session.created_at.isoformat() if session.created_at else None,
+            "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+            "message_count": session.message_count,
+        },
+        "memory": {
+            "summary": context.get("summary", ""),
+            "total_tokens": context.get("total_tokens", 0),
+            "recent_topics": context.get("recent_topics", []),
+        },
+        "history": message_history,
+    }
+
+
+@router.get("/chat/sessions/{session_id}/messages")
+async def get_session_messages_api(
+    session_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取指定会话的消息列表
+
+    用于前端恢复对话上下文
+    """
+    from app.services.chat_service import ChatService
+
+    # 验证会话归属
+    chat_service = ChatService(db)
+    session = await chat_service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    messages = await chat_service.get_session_messages(
+        session_id,
+        limit=limit,
+        offset=offset
+    )
+
+    return {
+        "session_id": session_id,
+        "messages": [
+            {
+                "id": str(msg.id),
+                "role": msg.role,
+                "content": msg.content,
+                "data_type": msg.data_type,
+                "structured_data": msg.structured_data,
+                "tool_calls": msg.tool_calls,
+                "created_at": msg.created_at.isoformat() if msg.created_at else None,
+            }
+            for msg in messages
+        ],
+        "total": session.message_count,
+    }
+
+
+@router.get("/chat/sessions/{session_id}/search")
+async def search_session_messages(
+    session_id: str,
+    query: str = "",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    搜索会话中的消息
+
+    用于在历史记录中查找相关内容
+    """
+    from app.services.chat_service import ChatService
+
+    # 验证会话归属
+    chat_service = ChatService(db)
+    session = await chat_service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    # 获取所有消息进行搜索
+    messages = await chat_service.get_session_messages(session_id, limit=200)
+
+    if not query:
+        return {
+            "session_id": session_id,
+            "query": query,
+            "results": [],
+            "total": 0,
+        }
+
+    # 简单关键词匹配（可以后续升级为向量搜索）
+    query_lower = query.lower()
+    results = []
+    for msg in messages:
+        if msg.role in ["user", "assistant"] and query_lower in msg.content.lower():
+            results.append({
+                "id": str(msg.id),
+                "role": msg.role,
+                "content": msg.content,
+                "data_type": msg.data_type,
+                "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                # 返回匹配的部分及其上下文
+                "snippet": _get_match_snippet(msg.content, query),
+            })
+
+    return {
+        "session_id": session_id,
+        "query": query,
+        "results": results,
+        "total": len(results),
+    }
+
+
+def _get_match_snippet(content: str, query: str, context_length: int = 50) -> str:
+    """获取匹配的文本片段及其上下文"""
+    query_lower = query.lower()
+    content_lower = content.lower()
+    pos = content_lower.find(query_lower)
+
+    if pos == -1:
+        return content[:100] + "..." if len(content) > 100 else content
+
+    start = max(0, pos - context_length)
+    end = min(len(content), pos + len(query) + context_length)
+
+    snippet = content[start:end]
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(content):
+        snippet = snippet + "..."
+
+    return snippet
+
+
+@router.get("/chat/sessions/{session_id}/stats")
+async def get_session_stats(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取会话统计信息
+
+    包括消息数量、交互轮数、生成的计划数等
+    """
+    from app.services.chat_service import ChatService
+
+    # 验证会话归属
+    chat_service = ChatService(db)
+    session = await chat_service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    # 获取消息统计
+    messages = await chat_service.get_session_messages(session_id, limit=500)
+
+    user_messages = [m for m in messages if m.role == "user"]
+    assistant_messages = [m for m in messages if m.role == "assistant"]
+    workout_plans = [m for m in messages if m.data_type == "workout_plan"]
+
+    # 计算交互轮数（用户消息数）
+    interaction_turns = len(user_messages)
+
+    # 计算总消息长度
+    total_chars = sum(len(m.content) for m in messages)
+
+    return {
+        "session_id": session_id,
+        "stats": {
+            "total_messages": len(messages),
+            "user_messages": len(user_messages),
+            "assistant_messages": len(assistant_messages),
+            "interaction_turns": interaction_turns,
+            "workout_plans_generated": len(workout_plans),
+            "total_characters": total_chars,
+            "avg_message_length": total_chars // len(messages) if messages else 0,
+        },
+        "session": {
+            "title": session.title,
+            "created_at": session.created_at.isoformat() if session.created_at else None,
+            "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+            "has_summary": bool(session.context_summary),
+        },
+    }
+
+
+@router.get("/chat/sessions/{session_id}/key-info")
+async def get_session_key_info(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取会话中提取的关键信息
+
+    包括讨论的主题、目标、生成的计划等
+    用于个性化推荐和用户画像构建
+    """
+    from app.services.chat_service import ChatService
+
+    # 验证会话归属
+    chat_service = ChatService(db)
+    session = await chat_service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    context_service = ContextService(db)
+    key_info = await context_service.extract_key_info_from_session(session_id)
+
+    return {
+        "session_id": session_id,
+        "key_info": key_info,
+    }
+
+
+@router.get("/chat/sessions-summaries")
+async def get_sessions_summaries(
+    limit: int = 10,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取用户所有会话的摘要列表
+
+    用于展示会话历史和快速切换
+    """
+    context_service = ContextService(db)
+    summaries = await context_service.get_multi_session_summaries(
+        user_id=str(current_user.id),
+        limit=limit
+    )
+
+    return {
+        "user_id": str(current_user.id),
+        "sessions": summaries,
+        "total": len(summaries),
+    }
+
+
+@router.get("/chat/memory/timeline")
+async def get_memory_timeline(
+    days: int = 30,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取用户记忆时间线
+
+    按时间顺序展示所有会话和关键信息
+    用于前端展示用户与AI的交互历史
+    """
+    from app.services.chat_service import ChatService
+    from app.models.chat_session import ChatSession
+    from sqlalchemy import and_
+
+    # 获取时间范围内的所有会话
+    cutoff_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    result = await db.execute(
+        select(ChatSession)
+        .where(
+            and_(
+                ChatSession.user_id == str(current_user.id),
+                ChatSession.created_at >= cutoff_date
+            )
+        )
+        .order_by(desc(ChatSession.created_at))
+    )
+    sessions = result.scalars().all()
+
+    timeline = []
+    for session in sessions:
+        # 获取该会话的消息
+        messages = await db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session.id)
+            .order_by(ChatMessage.created_at)
+        )
+        message_list = messages.scalars().all()
+
+        # 提取关键信息
+        user_msgs = [m for m in message_list if m.role == "user"]
+        first_message = user_msgs[0].content[:50] if user_msgs else ""
+        workout_plans = [m for m in message_list if m.data_type == "workout_plan"]
+
+        timeline.append({
+            "session_id": session.id,
+            "title": session.title,
+            "first_message": first_message,
+            "message_count": session.message_count,
+            "workout_plans_count": len(workout_plans),
+            "has_summary": bool(session.context_summary),
+            "created_at": session.created_at.isoformat() if session.created_at else None,
+            "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+        })
+
+    return {
+        "user_id": str(current_user.id),
+        "days": days,
+        "timeline": timeline,
+        "total_sessions": len(timeline),
+    }
+
+
+from datetime import datetime

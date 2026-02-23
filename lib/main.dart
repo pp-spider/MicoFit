@@ -270,6 +270,7 @@ class _MainPageState extends State<MainPage> {
 
     final authProvider = _authProvider;
     final profileProvider = context.read<UserProfileProvider>();
+    final progressProvider = context.read<WorkoutProgressProvider>();
     final workoutProvider = context.read<WorkoutProvider>();
     final statsProvider = context.read<MonthlyStatsProvider>();
     final chatProvider = context.read<ChatProvider>();
@@ -288,12 +289,20 @@ class _MainPageState extends State<MainPage> {
     }
 
     if (userId != null && userId.isNotEmpty) {
+      // 先设置当前用户ID，确保后续操作使用正确的用户隔离
+      UserDataHelper.setCurrentUserId(userId);
+      debugPrint('[MainPage] 已设置当前用户ID: $userId (${authProvider.isOfflineMode ? "离线" : "在线"})');
+
       // 如果内存中已有数据，先清除（防止用户切换时看到旧数据）
       if (chatProvider.messages.isNotEmpty) {
         chatProvider.clearMemoryData();
       }
-      UserDataHelper.setCurrentUserId(userId);
-      debugPrint('[MainPage] 已设置当前用户ID: $userId (${authProvider.isOfflineMode ? "离线" : "在线"})');
+      // 清理训练进度内存数据（不删除后端数据）
+      await progressProvider.clearMemoryOnly();
+      // 清理训练计划
+      workoutProvider.clearTodayWorkout();
+      // 清理月度统计
+      statsProvider.clearStats();
     }
 
     // 已登录，初始化并检查用户画像
@@ -307,6 +316,8 @@ class _MainPageState extends State<MainPage> {
     if (profileProvider.hasProfile) {
       // 有画像：加载训练计划和月度统计，跳转今日计划
       workoutProvider.loadTodayWorkout();
+      // 加载训练进度（恢复训练状态）
+      progressProvider.loadTodayProgress();
       // 加载月度统计数据，用于坚持天数显示
       final now = DateTime.now();
       statsProvider.loadMonthlyStats(now.year, now.month);
@@ -361,6 +372,39 @@ class _MainPageState extends State<MainPage> {
   Future<bool> _onWillPop() async {
     // 如果在加载页面，不允许返回
     if (_currentPage == 'loading') {
+      return false;
+    }
+
+    // 如果未登录且在登录页面，直接退出APP
+    if (_currentPage == 'login') {
+      final authProvider = _authProvider;
+      if (authProvider == null || !authProvider.isAuthenticated) {
+        // 未登录状态，允许退出APP
+        return true;
+      }
+    }
+
+    // 如果在信息录入页面且没有用户画像（新用户），阻止返回
+    if (_currentPage == 'onboarding') {
+      final profileProvider = context.read<UserProfileProvider>();
+      final profile = profileProvider.profile;
+      if (profile == null) {
+        // 新用户，必须完成信息录入，显示提示
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('请完成信息填写'),
+              duration: Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return false;
+      }
+      // 有画像（编辑模式），允许返回到个人资料页
+      setState(() {
+        _currentPage = 'profile';
+      });
       return false;
     }
 
@@ -708,6 +752,14 @@ class _MainPageState extends State<MainPage> {
 
   // 退出登录
   void _handleLogout() async {
+    // 先获取 Provider 引用，避免跨异步调用问题
+    final authProvider = context.read<AuthProvider>();
+    final profileProvider = context.read<UserProfileProvider>();
+    final progressProvider = context.read<WorkoutProgressProvider>();
+    final workoutProvider = context.read<WorkoutProvider>();
+    final statsProvider = context.read<MonthlyStatsProvider>();
+    final chatProvider = context.read<ChatProvider>();
+
     // 显示加载指示器
     showDialog(
       context: context,
@@ -718,7 +770,17 @@ class _MainPageState extends State<MainPage> {
     );
 
     // 执行登出
-    await context.read<AuthProvider>().logout();
+    await authProvider.logout();
+
+    // 清理其他 Provider 的内存数据，防止用户切换时串读
+    await profileProvider.clearProfile();
+    await progressProvider.clearMemoryOnly();
+    // 清理训练计划（重新加载即可）
+    workoutProvider.clearTodayWorkout();
+    // 清理月度统计（重新加载即可）
+    statsProvider.clearStats();
+    // 清理聊天数据
+    chatProvider.clearMemoryData();
 
     if (mounted) {
       // 关闭加载指示器
