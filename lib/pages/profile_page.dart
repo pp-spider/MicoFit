@@ -1,9 +1,14 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import '../config/app_config.dart';
 import '../models/exercise.dart';
 import '../models/user_profile.dart';
 import '../models/workout.dart';
+import '../services/avatar_service.dart';
 import '../services/workout_api_service.dart';
 import '../widgets/bottom_nav.dart';
+import '../widgets/empty_state_widget.dart';
 
 /// 个人资料页面
 class ProfilePage extends StatefulWidget {
@@ -36,6 +41,12 @@ class _ProfilePageState extends State<ProfilePage> {
   List<WorkoutPlan> _historyPlans = [];
   bool _isLoadingHistory = false;
 
+  // 头像服务
+  final AvatarService _avatarService = AvatarService();
+  String? _avatarPath;
+  bool _isLocalAvatar = true; // 标记当前头像是否为本地头像
+  bool _isLoadingAvatar = false;
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +58,156 @@ class _ProfilePageState extends State<ProfilePage> {
       _timeBudget = 12;
     }
     _loadHistoryPlans();
+    _loadAvatar();
+  }
+
+  // 加载头像（优先本地，其次服务器）
+  Future<void> _loadAvatar() async {
+    // 1. 先尝试加载本地头像
+    final localPath = await _avatarService.getLocalAvatarPath();
+    if (mounted && localPath != null) {
+      setState(() {
+        _avatarPath = localPath;
+        _isLocalAvatar = true;
+      });
+      return;
+    }
+
+    // 2. 如果没有本地头像，尝试从服务器获取
+    final serverAvatarUrl = await _avatarService.getServerAvatarUrl();
+    if (mounted && serverAvatarUrl != null) {
+      // 服务器返回的是相对路径，需要拼接完整URL
+      final fullUrl = '${AppConfig.apiBaseUrl}$serverAvatarUrl';
+      setState(() {
+        _avatarPath = fullUrl;
+        _isLocalAvatar = false;
+      });
+    }
+  }
+
+  // 更换头像
+  Future<void> _changeAvatar() async {
+    setState(() => _isLoadingAvatar = true);
+
+    final ImageSource? source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(24),
+              topRight: Radius.circular(24),
+            ),
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    '更换头像',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2DD4BF).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.photo_library,
+                        color: Color(0xFF2DD4BF),
+                      ),
+                    ),
+                    title: const Text(
+                      '从相册选择',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    onTap: () => Navigator.pop(context, ImageSource.gallery),
+                  ),
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2DD4BF).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.camera_alt,
+                        color: Color(0xFF2DD4BF),
+                      ),
+                    ),
+                    title: const Text(
+                      '拍照',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    onTap: () => Navigator.pop(context, ImageSource.camera),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (source == null) {
+      setState(() => _isLoadingAvatar = false);
+      return;
+    }
+
+    File? imageFile;
+    if (source == ImageSource.gallery) {
+      imageFile = await _avatarService.pickImageFromGallery();
+    } else {
+      imageFile = await _avatarService.takePhoto();
+    }
+
+    if (imageFile != null) {
+      // 先保存到本地
+      final savedPath = await _avatarService.saveAvatarLocally(imageFile);
+      if (savedPath != null && mounted) {
+        setState(() {
+          _avatarPath = savedPath;
+          _isLocalAvatar = true; // 标记为本地头像
+        });
+      }
+
+      // 上传到服务器
+      final serverAvatarUrl = await _avatarService.uploadAvatarToServer(imageFile);
+      if (serverAvatarUrl != null) {
+        debugPrint('[ProfilePage] 头像已上传到服务器: $serverAvatarUrl');
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isLoadingAvatar = false);
+    }
   }
 
   // 加载历史训练计划
@@ -617,40 +778,9 @@ class _ProfilePageState extends State<ProfilePage> {
     if (widget.userProfile == null) {
       return Scaffold(
         backgroundColor: const Color(0xFFF5F5F0),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.person_outline,
-                size: 80,
-                color: Colors.grey[400],
-              ),
-              const SizedBox(height: 24),
-              Text(
-                '尚未完善个人信息',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey[600],
-                ),
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton(
-                onPressed: () => widget.onNavigate('onboarding'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2DD4BF),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 32,
-                    vertical: 16,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-                child: const Text('去录入'),
-              ),
-            ],
+        body: SafeArea(
+          child: EmptyStateWidget.profile(
+            onComplete: () => widget.onNavigate('onboarding'),
           ),
         ),
       );
@@ -702,17 +832,81 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                       child: Row(
                         children: [
-                          Container(
-                            width: 64,
-                            height: 64,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.2),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.person,
-                              size: 32,
-                              color: Colors.white,
+                          GestureDetector(
+                            onTap: _isLoadingAvatar ? null : _changeAvatar,
+                            child: Stack(
+                              children: [
+                                Container(
+                                  width: 64,
+                                  height: 64,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.2),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                    image: _avatarPath != null
+                                        ? DecorationImage(
+                                            image: _isLocalAvatar
+                                                ? FileImage(File(_avatarPath!))
+                                                : NetworkImage(_avatarPath!),
+                                            fit: BoxFit.cover,
+                                          )
+                                        : null,
+                                  ),
+                                  child: _avatarPath == null
+                                      ? const Icon(
+                                          Icons.person,
+                                          size: 32,
+                                          color: Colors.white,
+                                        )
+                                      : null,
+                                ),
+                                if (_isLoadingAvatar)
+                                  Container(
+                                    width: 64,
+                                    height: 64,
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.3),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Center(
+                                      child: SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                // 编辑图标
+                                Positioned(
+                                  bottom: 0,
+                                  right: 0,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.1),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(
+                                      Icons.camera_alt,
+                                      size: 14,
+                                      color: Color(0xFF2DD4BF),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                           const SizedBox(width: 16),
@@ -795,6 +989,33 @@ class _ProfilePageState extends State<ProfilePage> {
                         if (widget.userProfile!.limitations.isNotEmpty)
                           _buildInfoItem('身体限制', _getLimitationsLabels(widget.userProfile!.limitations), isWarning: true),
                       ],
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // 成就徽章入口
+                    _buildActionButton(
+                      icon: Icons.emoji_events,
+                      label: '我的成就',
+                      onTap: () => widget.onNavigate('achievements'),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // 训练报告入口
+                    _buildActionButton(
+                      icon: Icons.bar_chart,
+                      label: '训练报告',
+                      onTap: () => widget.onNavigate('training_report'),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // 好友入口
+                    _buildActionButton(
+                      icon: Icons.people,
+                      label: '我的好友',
+                      onTap: () => widget.onNavigate('friends'),
                     ),
 
                     const SizedBox(height: 24),

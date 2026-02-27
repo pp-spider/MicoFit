@@ -49,8 +49,19 @@ dependencies:
   dart_openai: ^6.1.1
   http: ^1.2.0
 
+  # 图片选择
+  image_picker: ^1.0.7
+
   # Markdown 渲染
   flutter_markdown: ^0.7.4+3
+
+  # 图表库
+  fl_chart: ^0.68.0
+
+  # 分享功能
+  share_plus: ^7.2.0
+  screenshot: ^2.1.0
+  path_provider: ^2.1.0
 
   # 3D模型渲染 (使用 2D Canvas 实现)
   # three_js: ^0.1.7

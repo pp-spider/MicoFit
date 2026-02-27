@@ -5,6 +5,7 @@ import '../models/chat_message.dart';
 import '../models/exercise.dart';
 import '../models/workout.dart';
 import '../widgets/bottom_nav.dart';
+import '../widgets/empty_state_widget.dart';
 import '../providers/chat_provider.dart';
 import '../services/network_service.dart';
 import 'chat_sessions_page.dart';
@@ -48,14 +49,6 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   // 动画控制器
   late AnimationController _pulseController;
   late AnimationController _slideController;
-
-  // 快捷问题列表
-  final List<String> _quickQuestions = [
-    '今天适合什么训练？',
-    '如何缓解运动后的疲劳？',
-    '有什么减脂建议吗？',
-    '我想增强核心力量',
-  ];
 
   // Markdown 样式表缓存（避免重复创建）
   static final MarkdownStyleSheet _cachedMarkdownStyleSheet = MarkdownStyleSheet(
@@ -181,9 +174,13 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
-    // 动画完成后滚动到底部
+    // 启动脉冲动画（用于流式生成时的光标效果）
+    _pulseController.repeat(reverse: true);
+    // 入场动画
     Future.delayed(const Duration(milliseconds: 100), () {
-      _slideController.forward();
+      if (mounted) {
+        _slideController.forward();
+      }
     });
     // 等待动画和布局完成后再滚动
     Future.delayed(const Duration(milliseconds: 800), () {
@@ -197,18 +194,15 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    // 确保动画控制器先停止再释放
+    _pulseController.stop();
+    _slideController.stop();
     _textController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
     _pulseController.dispose();
     _slideController.dispose();
     super.dispose();
-  }
-
-  /// 发送快捷问题
-  void _sendQuickQuestion(String question) {
-    _textController.text = question;
-    _sendMessage();
   }
 
   /// 发送消息（通过 Provider）
@@ -312,9 +306,6 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                     Expanded(
                       child: _buildChatArea(),
                     ),
-
-                    // Quick Questions (仅当消息很少时显示)
-                    _buildQuickQuestions(),
 
                     // Input Area
                     _buildInputArea(),
@@ -555,71 +546,19 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     );
   }
 
-  /// 空状态（DeepSeek/Kimi风格 - 未选中任何会话）
+  /// 空状态 - 使用统一设计
   Widget _buildEmptyState() {
     return SingleChildScrollView(
       child: Column(
         children: [
-          // 品牌展示区
-          const SizedBox(height: 80),
-          _buildBrandHero(),
+          const SizedBox(height: 60),
+          EmptyStateWidget.chat(),
           const SizedBox(height: 32),
           // 快捷提示网格
           _buildQuickPromptsGrid(),
           const SizedBox(height: 24),
         ],
       ),
-    );
-  }
-
-  /// 品牌展示区（Hero Section）
-  Widget _buildBrandHero() {
-    return Column(
-      children: [
-        // 大Logo
-        Container(
-          width: 80,
-          height: 80,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF2DD4BF), Color(0xFF14B8A6)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF2DD4BF).withValues(alpha: 0.3),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: const Icon(
-            Icons.fitness_center,
-            size: 36,
-            color: Colors.white,
-          ),
-        ),
-        const SizedBox(height: 20),
-        // Slogan
-        const Text(
-          '你的AI健身教练',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF115E59),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '随时随地，享受碎片化训练',
-          style: TextStyle(
-            fontSize: 15,
-            color: Colors.grey[600],
-          ),
-        ),
-      ],
     );
   }
 
@@ -690,7 +629,10 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   /// 快捷提示卡片
   Widget _buildPromptCard(_QuickPrompt prompt) {
     return GestureDetector(
-      onTap: () => _sendQuickQuestion(prompt.desc),
+      onTap: () {
+        _textController.text = prompt.desc;
+        _sendMessage();
+      },
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -774,11 +716,13 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     final isStreaming = message.id == chatProvider.streamingMessageId;
     final isEmptyAI = !isUser && message.content.trim().isEmpty;
 
-    // 检查是否包含待确认的健身计划
-    final hasWorkoutPlan = !isUser &&
+    // 检查是否包含健身计划
+    // 如果计划未响应，只在最后一条消息显示；如果已响应，始终显示（变灰状态）
+    final isPlanMessage = !isUser &&
         message.dataType == ChatMessageDataType.workoutPlan &&
-        chatProvider.pendingWorkoutPlan != null &&
-        index == messages.length - 1;
+        chatProvider.pendingWorkoutPlan != null;
+    final hasWorkoutPlan = isPlanMessage &&
+        (chatProvider.isPlanResponded || index == messages.length - 1);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -830,7 +774,11 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                 ),
                 // 健身计划预览
                 if (hasWorkoutPlan && chatProvider.pendingWorkoutPlan != null)
-                  _buildWorkoutPlanPreview(chatProvider.pendingWorkoutPlan!, chatProvider),
+                  _buildWorkoutPlanPreview(
+                    chatProvider.pendingWorkoutPlan!,
+                    chatProvider,
+                    chatProvider.isPlanResponded,
+                  ),
                 // 时间戳和复制按钮
                 Padding(
                   padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
@@ -1020,91 +968,10 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     );
   }
 
-  /// 快捷问题
-  Widget _buildQuickQuestions() {
-    return Consumer<ChatProvider>(
-      builder: (context, chatProvider, child) {
-        final messages = chatProvider.messages;
-        if (messages.length > 2) return const SizedBox.shrink();
-
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(left: 4, right: 4, bottom: 8),
-                child: Text(
-                  '快捷提问',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ),
-              SizedBox(
-                height: 36,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _quickQuestions.length,
-                  itemBuilder: (context, index) {
-                    final question = _quickQuestions[index];
-                    return Padding(
-                      padding: EdgeInsets.only(right: index < _quickQuestions.length - 1 ? 8 : 0),
-                      child: GestureDetector(
-                        onTap: () => _sendQuickQuestion(question),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: const Color(0xFF2DD4BF).withValues(alpha: 0.4),
-                              width: 1,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF2DD4BF).withValues(alpha: 0.12),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.flash_on_rounded,
-                                size: 14,
-                                color: Colors.amber[600],
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                question,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF115E59),
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   /// 健身计划预览卡片
-  Widget _buildWorkoutPlanPreview(WorkoutPlan plan, ChatProvider chatProvider) {
+  Widget _buildWorkoutPlanPreview(WorkoutPlan plan, ChatProvider chatProvider, bool isResponded) {
+    final isConfirmed = chatProvider.isPlanConfirmed;
+
     return Container(
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.all(16),
@@ -1134,7 +1001,41 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
             return _buildModuleDetail(module, index + 1);
           }),
           const SizedBox(height: 16),
-          _buildActionButtons(plan, chatProvider),
+          if (!isResponded)
+            _buildActionButtons(plan, chatProvider)
+          else
+            _buildResponseStatus(isConfirmed),
+        ],
+      ),
+    );
+  }
+
+  /// 显示响应状态标签
+  Widget _buildResponseStatus(bool? isConfirmed) {
+    final confirmed = isConfirmed ?? false;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        color: confirmed ? Colors.green[50] : Colors.orange[50],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            confirmed ? Icons.check_circle : Icons.cancel,
+            color: confirmed ? Colors.green : Colors.orange,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            confirmed ? '已确认' : '已取消',
+            style: TextStyle(
+              color: confirmed ? Colors.green : Colors.orange,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -1484,9 +1385,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
         const SizedBox(width: 4),
         Text(
           text,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 12,
-            color: Colors.grey[600],
+            color: Colors.grey,
           ),
         ),
       ],

@@ -121,14 +121,25 @@ class UserDataHelper {
     return allKeys.where((key) => key.startsWith(prefix)).toList();
   }
 
-  /// 清除当前用户的所有数据
+  /// 清除当前用户的所有数据（保留训练计划相关数据）
   static Future<void> clearCurrentUserData() async {
     final userId = await getCurrentUserId();
     if (userId == null || userId.isEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
     final prefix = 'user_${userId}_';
-    final keysToRemove = prefs.getKeys().where((key) => key.startsWith(prefix)).toList();
+
+    // 需要保留的训练计划相关key
+    const preservedKeys = [
+      'pending_workout_plan',
+      'responded_workout_plan',
+      'is_plan_confirmed',
+    ];
+
+    final keysToRemove = prefs.getKeys().where((key) =>
+      key.startsWith(prefix) &&
+      !preservedKeys.any((preserved) => key.endsWith(preserved))
+    ).toList();
 
     for (final key in keysToRemove) {
       await prefs.remove(key);

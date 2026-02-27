@@ -59,6 +59,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 是否正在应用计划
   bool _isApplyingPlan = false;
 
+  /// 用户是否已响应计划（确认或取消）
+  bool _isPlanResponded = false;
+
+  /// 计划响应结果：null=未响应, true=已确认, false=已取消
+  bool? _isPlanConfirmed;
+
   /// 当前会话ID
   String? _currentSessionId;
 
@@ -100,6 +106,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   WorkoutPlan? get pendingWorkoutPlan => _pendingWorkoutPlan;
   bool get isApplyingPlan => _isApplyingPlan;
   bool get hasPendingPlan => _pendingWorkoutPlan != null;
+  bool get isPlanResponded => _isPlanResponded;
+  bool? get isPlanConfirmed => _isPlanConfirmed;
   String? get streamingMessageId => _streamingMessageId;
   String? get currentSessionId => _currentSessionId;
 
@@ -126,6 +134,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _messages.clear();
     _currentSessionId = null;
     _pendingWorkoutPlan = null;
+    _isPlanResponded = false;
+    _isPlanConfirmed = null;
 
     // 检查用户是否已登录（用户数据隔离）
     final userId = await UserDataHelper.getCurrentUserId();
@@ -145,8 +155,25 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('[ChatProvider] 同步聊天历史失败: $e');
     }
 
-    // 恢复待确认计划
+    // 恢复待确认计划或已响应的计划
     _pendingWorkoutPlan = await _localService.loadPendingPlan();
+    if (_pendingWorkoutPlan != null) {
+      // 有待确认计划，状态为未响应
+      _isPlanResponded = false;
+      _isPlanConfirmed = null;
+    } else {
+      // 没有待确认计划，尝试加载已响应的计划
+      _pendingWorkoutPlan = await _localService.loadRespondedPlan();
+      if (_pendingWorkoutPlan != null) {
+        // 有已响应的计划，恢复响应状态
+        _isPlanResponded = true;
+        _isPlanConfirmed = await _localService.loadIsPlanConfirmed();
+      } else {
+        // 没有任何计划
+        _isPlanResponded = false;
+        _isPlanConfirmed = null;
+      }
+    }
 
     // 注意：不加载历史消息到内存，保持空状态
     // 只有当用户选择某个会话时才加载该会话的消息（通过 switchSession）
@@ -159,6 +186,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _messages.clear();
     _currentSessionId = null;
     _pendingWorkoutPlan = null;
+    _isPlanResponded = false;
+    _isPlanConfirmed = null;
     _streamingMessageId = null;
     _streamingBuffer = null;
     _streamStatus = ChatStreamStatus.idle;
@@ -278,6 +307,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             if (plan != null) {
               receivedPlan = plan;
               _pendingWorkoutPlan = plan;
+              // 重置计划响应状态（新计划应该是未响应状态）
+              _isPlanResponded = false;
+              _isPlanConfirmed = null;
               // 保存计划到本地（不等待）
               _localService.savePendingPlan(plan);
               // 通知UI更新显示计划预览
@@ -521,17 +553,13 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         jsonEncode(plan.toJson()),
       );
 
-      // 清除待确认计划
-      _pendingWorkoutPlan = null;
+      // 标记计划已响应（保留计划在UI上显示）
+      _isPlanResponded = true;
+      _isPlanConfirmed = true;
       await _localService.clearPendingPlan();
+      // 保存已响应的计划到本地，以便重启后恢复
+      await _localService.saveRespondedPlan(plan, true);
       _isApplyingPlan = false;
-
-      // 添加确认消息
-      final confirmMessage = ChatMessage.assistant(
-        '✅ 计划已更新！在"今日"页面查看新计划，准备好就可以开始训练了！',
-      );
-      _messages.add(confirmMessage);
-      await _localService.saveMessage(confirmMessage);
 
       notifyListeners();
     } catch (e) {
@@ -549,26 +577,14 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   /// 拒绝健身计划
   Future<void> rejectWorkoutPlan() async {
-    _pendingWorkoutPlan = null;
+    // 标记计划已响应（保留计划在UI上显示）
+    _isPlanResponded = true;
+    _isPlanConfirmed = false;
     await _localService.clearPendingPlan();
-
-    // 检查用户是否已登录（用户数据隔离）
-    final userId = await UserDataHelper.getCurrentUserId();
-    if (userId == null || userId.isEmpty) {
-      debugPrint('[ChatProvider] 用户未登录，仅添加拒绝消息到内存');
-      final rejectMessage = ChatMessage.assistant(
-        '已取消。如果你有其他需求，随时告诉我！',
-      );
-      _messages.add(rejectMessage);
-      notifyListeners();
-      return;
+    // 保存已响应的计划到本地，以便重启后恢复
+    if (_pendingWorkoutPlan != null) {
+      await _localService.saveRespondedPlan(_pendingWorkoutPlan!, false);
     }
-
-    final rejectMessage = ChatMessage.assistant(
-      '已取消。如果你有其他需求，随时告诉我！',
-    );
-    _messages.add(rejectMessage);
-    await _localService.saveMessage(rejectMessage);
 
     notifyListeners();
   }
@@ -587,8 +603,14 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     _messages.clear();
     _pendingWorkoutPlan = null;
+    _isPlanResponded = false;
+    _isPlanConfirmed = null;
     _currentSessionId = null;
     _addWelcomeMessage();
+
+    // 清除本地存储的计划
+    await _localService.clearPendingPlan();
+    await _localService.clearRespondedPlan();
 
     notifyListeners();
   }
@@ -646,6 +668,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _currentSessionId = session.id;
       _messages.clear();
       _pendingWorkoutPlan = null;
+      _isPlanResponded = false;
+      _isPlanConfirmed = null;
+
+      // 清除已响应的计划（新会话不应该有之前的计划）
+      await _localService.clearRespondedPlan();
 
       // 注意：不添加欢迎消息，显示空状态
       notifyListeners();
@@ -662,8 +689,25 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentSessionId = sessionId;
     _messages.clear();
 
-    // 从本地恢复待确认的计划（如果有）
+    // 恢复待确认计划或已响应的计划
     _pendingWorkoutPlan = await _localService.loadPendingPlan();
+    if (_pendingWorkoutPlan != null) {
+      // 有待确认计划，状态为未响应
+      _isPlanResponded = false;
+      _isPlanConfirmed = null;
+    } else {
+      // 没有待确认计划，尝试加载已响应的计划
+      _pendingWorkoutPlan = await _localService.loadRespondedPlan();
+      if (_pendingWorkoutPlan != null) {
+        // 有已响应的计划，恢复响应状态
+        _isPlanResponded = true;
+        _isPlanConfirmed = await _localService.loadIsPlanConfirmed();
+      } else {
+        // 没有任何计划
+        _isPlanResponded = false;
+        _isPlanConfirmed = null;
+      }
+    }
 
     // 检查用户是否已登录
     final userId = await UserDataHelper.getCurrentUserId();
@@ -723,6 +767,14 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('[ChatProvider] 删除会话失败: $e');
     }
+  }
+
+  /// 批量删除会话
+  Future<void> deleteSessions(List<String> sessionIds) async {
+    for (final id in sessionIds) {
+      await deleteSession(id);
+    }
+    notifyListeners();
   }
 
   // ========== 应用生命周期处理 ==========

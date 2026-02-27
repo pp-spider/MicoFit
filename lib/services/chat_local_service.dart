@@ -9,6 +9,8 @@ class ChatLocalService {
   // 存储key
   static const String _chatHistoryKey = 'chat_history';
   static const String _pendingPlanKey = 'pending_workout_plan';
+  static const String _respondedPlanKey = 'responded_workout_plan';
+  static const String _isPlanConfirmedKey = 'is_plan_confirmed';
 
   // 最大保存消息数量
   static const int _maxMessages = 100;
@@ -90,5 +92,36 @@ class ChatLocalService {
   /// 清除待确认的健身计划
   Future<void> clearPendingPlan() async {
     await UserDataHelper.remove(_pendingPlanKey);
+  }
+
+  /// 保存已响应的健身计划（确认或取消）
+  Future<void> saveRespondedPlan(WorkoutPlan plan, bool isConfirmed) async {
+    await UserDataHelper.setString(_respondedPlanKey, jsonEncode(plan.toJson()));
+    await UserDataHelper.setBool(_isPlanConfirmedKey, isConfirmed);
+  }
+
+  /// 加载已响应的健身计划
+  Future<WorkoutPlan?> loadRespondedPlan() async {
+    final planJson = await UserDataHelper.getString(_respondedPlanKey);
+    if (planJson == null) return null;
+
+    try {
+      final json = jsonDecode(planJson) as Map<String, dynamic>;
+      return WorkoutPlan.fromJson(json);
+    } catch (e) {
+      debugPrint('加载已响应计划失败: $e');
+      return null;
+    }
+  }
+
+  /// 加载计划响应状态
+  Future<bool?> loadIsPlanConfirmed() async {
+    return await UserDataHelper.getBool(_isPlanConfirmedKey);
+  }
+
+  /// 清除已响应的健身计划
+  Future<void> clearRespondedPlan() async {
+    await UserDataHelper.remove(_respondedPlanKey);
+    await UserDataHelper.remove(_isPlanConfirmedKey);
   }
 }

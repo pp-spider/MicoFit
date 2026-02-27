@@ -17,6 +17,9 @@ class ChatSessionsPage extends StatefulWidget {
 }
 
 class _ChatSessionsPageState extends State<ChatSessionsPage> {
+  bool _isMultiSelectMode = false;
+  final Set<String> _selectedSessions = {};
+
   @override
   void initState() {
     super.initState();
@@ -26,20 +29,114 @@ class _ChatSessionsPageState extends State<ChatSessionsPage> {
     });
   }
 
+  void _toggleMultiSelectMode() {
+    setState(() {
+      _isMultiSelectMode = !_isMultiSelectMode;
+      if (!_isMultiSelectMode) {
+        _selectedSessions.clear();
+      }
+    });
+  }
+
+  void _toggleSessionSelection(String sessionId) {
+    setState(() {
+      if (_selectedSessions.contains(sessionId)) {
+        _selectedSessions.remove(sessionId);
+      } else {
+        _selectedSessions.add(sessionId);
+      }
+    });
+  }
+
+  void _selectAll() {
+    final provider = context.read<ChatProvider>();
+    setState(() {
+      if (_selectedSessions.length == provider.sessions.length) {
+        _selectedSessions.clear();
+      } else {
+        _selectedSessions.addAll(provider.sessions.map((s) => s.id));
+      }
+    });
+  }
+
+  void _deleteSelected() {
+    if (_selectedSessions.isEmpty) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除对话'),
+        content: Text('确定要删除选中的 ${_selectedSessions.length} 个对话吗？\n删除后无法恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await context.read<ChatProvider>().deleteSessions(_selectedSessions.toList());
+              if (context.mounted) {
+                Navigator.of(context).pop();
+                setState(() {
+                  _selectedSessions.clear();
+                  _isMultiSelectMode = false;
+                });
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('对话历史'),
+        title: Text(_isMultiSelectMode ? '已选择 ${_selectedSessions.length} 项' : '对话历史'),
         centerTitle: true,
         elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _createNewSession(context),
-            tooltip: '新建对话',
-          ),
-        ],
+        leading: _isMultiSelectMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _toggleMultiSelectMode,
+              )
+            : null,
+        actions: _isMultiSelectMode
+            ? [
+                IconButton(
+                  icon: Icon(
+                    _selectedSessions.length ==
+                            context.read<ChatProvider>().sessions.length
+                        ? Icons.deselect
+                        : Icons.select_all,
+                  ),
+                  onPressed: _selectAll,
+                  tooltip: '全选',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: _selectedSessions.isEmpty ? null : _deleteSelected,
+                  tooltip: '删除选中',
+                ),
+              ]
+            : [
+                IconButton(
+                  icon: const Icon(Icons.playlist_add_check),
+                  onPressed: _toggleMultiSelectMode,
+                  tooltip: '管理',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  onPressed: () => _createNewSession(context),
+                  tooltip: '新建对话',
+                ),
+              ],
       ),
       body: Consumer<ChatProvider>(
         builder: (context, provider, _) {
@@ -89,11 +186,26 @@ class _ChatSessionsPageState extends State<ChatSessionsPage> {
             itemBuilder: (context, index) {
               final session = provider.sessions[index];
               final isActive = session.id == provider.currentSessionId;
+              final isSelected = _selectedSessions.contains(session.id);
 
               return _SessionListItem(
                 session: session,
                 isActive: isActive,
-                onTap: () => _selectSession(context, session),
+                isMultiSelectMode: _isMultiSelectMode,
+                isSelected: isSelected,
+                onTap: () {
+                  if (_isMultiSelectMode) {
+                    _toggleSessionSelection(session.id);
+                  } else {
+                    _selectSession(context, session);
+                  }
+                },
+                onLongPress: () {
+                  if (!_isMultiSelectMode) {
+                    _toggleMultiSelectMode();
+                    _toggleSessionSelection(session.id);
+                  }
+                },
                 onRename: () => _showRenameDialog(context, session),
                 onDelete: () => _showDeleteDialog(context, session),
               );
@@ -204,14 +316,20 @@ class _ChatSessionsPageState extends State<ChatSessionsPage> {
 class _SessionListItem extends StatelessWidget {
   final ChatSession session;
   final bool isActive;
+  final bool isMultiSelectMode;
+  final bool isSelected;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final VoidCallback onRename;
   final VoidCallback onDelete;
 
   const _SessionListItem({
     required this.session,
     required this.isActive,
+    this.isMultiSelectMode = false,
+    this.isSelected = false,
     required this.onTap,
+    this.onLongPress,
     required this.onRename,
     required this.onDelete,
   });
@@ -219,12 +337,18 @@ class _SessionListItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(
-        isActive ? Icons.chat : Icons.chat_outlined,
-        color: isActive
-            ? Theme.of(context).primaryColor
-            : Colors.grey[600],
-      ),
+      leading: isMultiSelectMode
+          ? Checkbox(
+              value: isSelected,
+              onChanged: (_) => onTap(),
+              activeColor: Theme.of(context).primaryColor,
+            )
+          : Icon(
+              isActive ? Icons.chat : Icons.chat_outlined,
+              color: isActive
+                  ? Theme.of(context).primaryColor
+                  : Colors.grey[600],
+            ),
       title: Text(
         session.title ?? '新对话',
         maxLines: 1,
@@ -239,41 +363,44 @@ class _SessionListItem extends StatelessWidget {
               color: Colors.grey[600],
             ),
       ),
-      trailing: PopupMenuButton<String>(
-        icon: Icon(Icons.more_vert, color: Colors.grey[600]),
-        itemBuilder: (context) => [
-          const PopupMenuItem(
-            value: 'rename',
-            child: Row(
-              children: [
-                Icon(Icons.edit, size: 20),
-                SizedBox(width: 12),
-                Text('重命名'),
+      trailing: isMultiSelectMode
+          ? null
+          : PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, color: Colors.grey[600]),
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'rename',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit, size: 20),
+                      SizedBox(width: 12),
+                      Text('重命名'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete, size: 20, color: Colors.red),
+                      SizedBox(width: 12),
+                      Text('删除', style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                ),
               ],
+              onSelected: (value) {
+                if (value == 'rename') {
+                  onRename();
+                } else if (value == 'delete') {
+                  onDelete();
+                }
+              },
             ),
-          ),
-          const PopupMenuItem(
-            value: 'delete',
-            child: Row(
-              children: [
-                Icon(Icons.delete, size: 20, color: Colors.red),
-                SizedBox(width: 12),
-                Text('删除', style: TextStyle(color: Colors.red)),
-              ],
-            ),
-          ),
-        ],
-        onSelected: (value) {
-          if (value == 'rename') {
-            onRename();
-          } else if (value == 'delete') {
-            onDelete();
-          }
-        },
-      ),
       selected: isActive,
       selectedTileColor: Theme.of(context).primaryColor.withValues(alpha: 0.1),
       onTap: onTap,
+      onLongPress: onLongPress,
     );
   }
 

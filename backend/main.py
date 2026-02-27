@@ -1,12 +1,26 @@
 """微动 MicoFit Backend - FastAPI 应用入口"""
+import logging
+# 必须在导入任何其他模块之前配置日志
+logging.basicConfig(
+    level=logging.WARNING,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True  # 强制重置已有配置
+)
+
+# 抑制 SQLAlchemy 的所有日志（必须在导入前设置）
+for logger_name in ['sqlalchemy', 'sqlalchemy.engine', 'sqlalchemy.engine.Engine',
+                    'sqlalchemy.pool', 'sqlalchemy.dialects', 'sqlalchemy.orm',
+                    'aiomysql', 'pymysql', 'mysqlconnector']:
+    logging.getLogger(logger_name).setLevel(logging.WARNING)
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
-import logging
 
 from app.core.config import settings
+from app.core.exception_handler import register_exception_handlers
 from app.api.v1 import auth, profiles, users, ai, workouts, feedback, sync, chat_sessions
 from app.db.base import Base
 
@@ -91,6 +105,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 注册全局异常处理器
+register_exception_handlers(app)
 
 # 注册路由
 app.include_router(auth.router, prefix="/api/v1")

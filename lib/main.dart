@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 
 import 'pages/today_plan_page.dart';
+import 'widgets/error_boundary.dart';
+import 'widgets/offline_indicator.dart';
+import 'widgets/skeleton_widgets.dart';
 import 'pages/exercise_detail_page.dart';
 import 'pages/feedback_page.dart';
 import 'pages/weekly_view_page.dart';
@@ -12,6 +15,10 @@ import 'pages/profile_page.dart';
 import 'pages/ai_chat_page.dart';
 import 'pages/splash_page.dart';
 import 'pages/login_page.dart';
+import 'pages/achievements_page.dart';
+import 'pages/training_report_page.dart';
+import 'pages/friends_page.dart';
+import 'models/achievement.dart';
 import 'models/exercise.dart';
 import 'models/user_profile.dart';
 import 'models/weekly_data.dart';
@@ -22,6 +29,8 @@ import 'providers/workout_progress_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/sync_provider.dart';
+import 'providers/network_provider.dart';
+import 'providers/friend_provider.dart';
 import 'services/sync_manager.dart';
 import 'utils/user_id_generator.dart';
 import 'utils/user_data_helper.dart';
@@ -65,6 +74,14 @@ void main() async {
         // 同步状态 Provider
         ChangeNotifierProvider(
           create: (_) => SyncProvider()..init(),
+        ),
+        // 网络状态 Provider
+        ChangeNotifierProvider(
+          create: (_) => NetworkProvider()..init(),
+        ),
+        // 好友 Provider
+        ChangeNotifierProvider(
+          create: (_) => FriendProvider(),
         ),
       ],
       child: const MicoFitApp(),
@@ -161,7 +178,7 @@ class MicoFitApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const MainPage(),
+      home: const ErrorBoundary(child: MainPage()),
     );
   }
 }
@@ -853,7 +870,27 @@ class _MainPageState extends State<MainPage> {
           SystemNavigator.pop();
         }
       },
-      child: _buildCurrentPage(),
+      child: OfflineIndicator(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0.05, 0),
+                  end: Offset.zero,
+                ).animate(CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeOutCubic,
+                )),
+                child: child,
+              ),
+            );
+          },
+          child: _buildCurrentPage(),
+        ),
+      ),
     );
   }
 
@@ -861,6 +898,7 @@ class _MainPageState extends State<MainPage> {
     switch (_currentPage) {
       case 'loading':
         return const Scaffold(
+          key: ValueKey('loading'),
           backgroundColor: Color(0xFFF5F5F0),
           body: Center(
             child: CircularProgressIndicator(),
@@ -869,17 +907,19 @@ class _MainPageState extends State<MainPage> {
 
       case 'splash':
         return SplashPage(
+          key: const ValueKey('splash'),
           onNeedLogin: () {
             setState(() => _currentPage = 'login');
           },
         );
 
       case 'login':
-        return const LoginPage();
+        return const LoginPage(key: ValueKey('login'));
 
       case 'onboarding':
         final profile = context.watch<UserProfileProvider>().profile;
         return OnboardingPage(
+          key: const ValueKey('onboarding'),
           onComplete: _handleOnboardingComplete,
           onCancel: profile != null ? () => _navigateTo('profile') : null,
           initialProfile: profile,
@@ -892,7 +932,12 @@ class _MainPageState extends State<MainPage> {
             if (workoutProvider.isLoading) {
               return const Scaffold(
                 backgroundColor: Color(0xFFF5F5F0),
-                body: Center(child: CircularProgressIndicator()),
+                body: SafeArea(
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.all(16),
+                    child: WorkoutCardSkeleton(),
+                  ),
+                ),
               );
             }
 
@@ -912,6 +957,66 @@ class _MainPageState extends State<MainPage> {
                           workoutProvider.loadTodayWorkout();
                         },
                         child: Text('重试'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            // 处理 todayWorkout 为 null 的情况
+            if (workoutProvider.todayWorkout == null) {
+              return Scaffold(
+                backgroundColor: Color(0xFFF5F5F0),
+                appBar: AppBar(
+                  title: Text('今日计划'),
+                  backgroundColor: Color(0xFFF5F5F0),
+                  elevation: 0,
+                ),
+                body: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.fitness_center_outlined,
+                        size: 64,
+                        color: Color(0xFF2DD4BF),
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        '今日暂无训练计划',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF115E59),
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        '点击下方按钮生成今日训练计划',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                      SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          workoutProvider.loadTodayWorkout();
+                        },
+                        icon: Icon(Icons.refresh),
+                        label: Text('生成训练计划'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Color(0xFF2DD4BF),
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -940,6 +1045,70 @@ class _MainPageState extends State<MainPage> {
         // Fallback to today page
         return Consumer<WorkoutProvider>(
           builder: (context, workoutProvider, child) {
+            if (workoutProvider.isLoading) {
+              return const Scaffold(
+                backgroundColor: Color(0xFFF5F5F0),
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (workoutProvider.todayWorkout == null) {
+              return Scaffold(
+                backgroundColor: Color(0xFFF5F5F0),
+                appBar: AppBar(
+                  title: Text('今日计划'),
+                  backgroundColor: Color(0xFFF5F5F0),
+                  elevation: 0,
+                ),
+                body: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.fitness_center_outlined,
+                        size: 64,
+                        color: Color(0xFF2DD4BF),
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        '今日暂无训练计划',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF115E59),
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        '点击下方按钮生成今日训练计划',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                      SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          workoutProvider.loadTodayWorkout();
+                        },
+                        icon: Icon(Icons.refresh),
+                        label: Text('生成训练计划'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Color(0xFF2DD4BF),
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
             return TodayPlanPage(
               workoutPlan: workoutProvider.todayWorkout!,
               onStartWorkout: _startWorkout,
@@ -977,6 +1146,7 @@ class _MainPageState extends State<MainPage> {
 
       case 'ai':
         return AiChatPage(
+          key: const ValueKey('ai'),
           onNavigate: _navigateTo,
         );
 
@@ -984,6 +1154,7 @@ class _MainPageState extends State<MainPage> {
         return Consumer<UserProfileProvider>(
           builder: (context, profileProvider, child) {
             return ProfilePage(
+              key: const ValueKey('profile'),
               userProfile: profileProvider.profile,
               onNavigate: _navigateTo,
               onReset: _handleReset,
@@ -1014,6 +1185,37 @@ class _MainPageState extends State<MainPage> {
               onLogout: _handleLogout,
             );
           },
+        );
+
+      case 'achievements':
+        return AchievementsPage(
+          key: const ValueKey('achievements'),
+          achievements: AchievementDefinitions.all,
+          onBack: () => _navigateTo('profile'),
+        );
+
+      case 'training_report':
+        return Consumer<MonthlyStatsProvider>(
+          builder: (context, statsProvider, child) {
+            return TrainingReportPage(
+              key: const ValueKey('training_report'),
+              monthlyStats: statsProvider.monthlyStats ?? MonthlyStats.createSample(),
+              sceneData: const {
+                '办公室': 45,
+                '卧室': 30,
+                '客厅': 40,
+                '户外': 15,
+                '健身房': 10,
+              },
+              onBack: () => _navigateTo('weekly'),
+            );
+          },
+        );
+
+      case 'friends':
+        return FriendsPage(
+          key: const ValueKey('friends'),
+          onNavigate: _navigateTo,
         );
 
       default:

@@ -108,25 +108,36 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
               color: Color(0xFF115E59),
             ),
           ),
-          // 可点击的日期选择器
-          InkWell(
-            onTap: () => _showDatePicker(),
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Row(
-                children: [
-                  Icon(Icons.calendar_today, size: 16, color: Colors.grey[600]),
-                  const SizedBox(width: 6),
-                  Text(
-                    '${_monthlyData.year}年${_monthlyData.month}月',
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(Icons.arrow_drop_down, size: 16, color: Colors.grey[600]),
-                ],
+          Row(
+            children: [
+              // 训练报告入口
+              IconButton(
+                onPressed: () => widget.onNavigate('training_report'),
+                icon: const Icon(Icons.bar_chart, color: Color(0xFF2DD4BF)),
+                tooltip: '训练报告',
               ),
-            ),
+              const SizedBox(width: 4),
+              // 可点击的日期选择器
+              InkWell(
+                onTap: () => _showDatePicker(),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today, size: 16, color: Colors.grey[600]),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${_monthlyData.year}年${_monthlyData.month}月',
+                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.arrow_drop_down, size: 16, color: Colors.grey[600]),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

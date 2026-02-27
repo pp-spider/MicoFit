@@ -82,64 +82,9 @@ async def chat_continue(
     )
 
 
-@router.post("/workouts/generate/stream")
-async def generate_workout_stream(
-    preferences: dict | None = None,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    流式生成训练计划（SSE）
-
-    支持以下事件类型：
-    - chunk: 文本流块
-    - plan: 生成的训练计划
-    - saved: 计划已保存到数据库
-    - error: 错误
-    - done: 完成
-    """
-    service = AIService(db)
-
-    async def event_generator():
-        async for chunk in service.stream_generate_workout_plan(
-            user_id=str(current_user.id),
-            preferences=preferences
-        ):
-            yield {
-                "event": chunk.get("type", "chunk"),
-                "data": json.dumps(chunk, ensure_ascii=False, default=str)
-            }
-
-    return EventSourceResponse(
-        event_generator(),
-        media_type="text/event-stream"
-    )
-
-
-@router.post("/workouts/generate")
-async def generate_workout(
-    preferences: dict | None = None,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    生成训练计划（非流式）
-
-    直接返回生成的计划
-    """
-    service = AIService(db)
-    result = await service.generate_workout_plan(
-        user_id=str(current_user.id),
-        preferences=preferences
-    )
-
-    if not result.get("success"):
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result.get("error", "生成计划失败")
-        )
-
-    return result
+# 注意：/workouts/generate/stream 和 /workouts/generate 接口已移除
+# 请统一使用 /chat/stream 接口发送"生成计划"类消息
+# 例如：发送 "请为我生成今日训练计划"
 
 
 @router.get("/chat/sessions/{session_id}/context")

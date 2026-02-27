@@ -1,5 +1,6 @@
 """上下文管理服务 - 实现AI记忆功能"""
 import json
+import re
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession

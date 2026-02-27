@@ -21,7 +21,8 @@
       "Bash(flutter pub upgrade:*)",
       "Bash(flutter clean:*)",
       "Bash(del \"d:\\\\FlutterProjects\\\\micofit\\\\lib\\\\widgets\\\\limitations_3d_viewer.dart\")",
-      "Bash(alembic current:*)"
+      "Bash(alembic current:*)",
+      "Bash(/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -Command \"python -c \"\"import ast; ast.parse\\(open\\(''app/agents/prompts.py''\\).read\\(\\)\\); print\\(''prompts.py OK''\\)\"\" 2\\\\u0026\\\\u003e1\")"
     ]
   }
 }

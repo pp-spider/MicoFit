@@ -6,7 +6,7 @@ class AppConfig {
   // API 配置
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.5.14:8000',
+    defaultValue: 'http://192.168.31.98:8000',
   );
 
   // Token 存储 Key

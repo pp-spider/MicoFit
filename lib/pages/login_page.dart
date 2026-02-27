@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import 'terms_of_service_page.dart';
+import 'privacy_policy_page.dart';
 
 /// 登录/注册页面
 class LoginPage extends StatefulWidget {
@@ -288,7 +290,12 @@ class _LoginPageState extends State<LoginPage> {
               const Text('我已阅读并同意'),
               TextButton(
                 onPressed: () {
-                  // TODO: 显示用户协议
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const TermsOfServicePage(),
+                    ),
+                  );
                 },
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -300,7 +307,12 @@ class _LoginPageState extends State<LoginPage> {
               const Text('和'),
               TextButton(
                 onPressed: () {
-                  // TODO: 显示隐私政策
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const PrivacyPolicyPage(),
+                    ),
+                  );
                 },
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 4),

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import '../models/user_profile.dart';
 import 'http_client.dart';
 
@@ -87,5 +88,39 @@ class UserApiService {
     }
 
     return UserProfile.fromJson(data);
+  }
+
+  /// 更新用户头像URL
+  Future<bool> updateAvatar(String avatarUrl) async {
+    try {
+      final response = await _httpClient.put(
+        '/api/v1/users/me',
+        body: jsonEncode({'avatar_url': avatarUrl}),
+      );
+
+      if (!ApiHttpClient.isSuccess(response)) {
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('[UserApiService] 更新头像失败: $e');
+      return false;
+    }
+  }
+
+  /// 获取当前用户信息（包含头像）
+  Future<Map<String, dynamic>?> getCurrentUser() async {
+    try {
+      final response = await _httpClient.get('/api/v1/users/me');
+
+      if (!ApiHttpClient.isSuccess(response)) {
+        return null;
+      }
+
+      return ApiHttpClient.parseResponse(response);
+    } catch (e) {
+      return null;
+    }
   }
 }

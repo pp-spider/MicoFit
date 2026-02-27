@@ -1,12 +1,16 @@
 """AI服务层 - 封装LangGraph Agent调用"""
+import logging
 import uuid
 from typing import AsyncGenerator
+
+logger = logging.getLogger(__name__)
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
-from app.agents.workout_agent import WorkoutAgent
-from app.agents.chat_agent import ChatAgent
+from app.agents.router_agent import RouterAgent
+from app.agents.chat_sub_agent import ChatSubAgent
+from app.agents.workout_sub_agent import WorkoutSubAgent
 from app.services.workout_service import WorkoutService
 from app.services.chat_service import ChatService
 from app.services.user_service import UserService
@@ -19,8 +23,9 @@ class AIService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.workout_agent = WorkoutAgent()
-        self.chat_agent = ChatAgent()
+        self.router_agent = RouterAgent()  # 主入口：RouterAgent
+        self.chat_sub_agent = ChatSubAgent()  # 用于 continue 功能
+        self.workout_sub_agent = WorkoutSubAgent()  # 用于直接生成训练计划
         self.workout_service = WorkoutService(db)
         self.chat_service = ChatService(db)
         self.user_service = UserService(db)
@@ -105,11 +110,11 @@ class AIService:
                 first_message=message
             )
 
-        # 流式生成回复
+        # 流式生成回复 - 使用 RouterAgent
         full_content = ""
         workout_plan = None
 
-        async for chunk in self.chat_agent.chat_stream(
+        async for chunk in self.router_agent.process(
             user_id=user_id,
             session_id=session_id,
             user_message=message,
@@ -118,7 +123,20 @@ class AIService:
             context_summary=context.get("summary"),
             recent_memories=recent_memories
         ):
-            if chunk["type"] == "chunk":
+            if chunk["type"] == "intent":
+                # 意图识别结果，可以记录日志
+                logger.info(
+                    f"意图识别: {chunk.get('intent')} "
+                    f"(置信度: {chunk.get('confidence', 0):.2f})"
+                )
+                # 将意图信息传递给前端（可选）
+                yield {
+                    "type": "metadata",
+                    "intent": chunk.get("intent"),
+                    "confidence": chunk.get("confidence"),
+                    "entities": chunk.get("entities", {})
+                }
+            elif chunk["type"] == "chunk":
                 full_content += chunk["content"]
                 yield chunk
             elif chunk["type"] == "plan":
@@ -145,6 +163,7 @@ class AIService:
                         "plan_id": str(plan_record.id)
                     }
                 except Exception as e:
+                    logger.error(f"保存计划失败: {e}")
                     # 保存失败时仍然返回原始计划，但不返回plan_id
                     yield chunk
             elif chunk["type"] == "done":
@@ -162,6 +181,7 @@ class AIService:
                     "has_plan": workout_plan is not None
                 }
             elif chunk["type"] == "error":
+                logger.error(f"RouterAgent 错误: {chunk.get('message')}")
                 yield chunk
 
     async def continue_stream_chat(
@@ -229,15 +249,24 @@ class AIService:
         full_content = existing_content
         workout_plan = None
 
-        async for chunk in self.chat_agent.chat_stream_continue(
-            user_id=user_id,
-            session_id=session_id,
-            existing_content=existing_content,
-            user_profile=profile_dict,
-            history=history_dicts,
-            context_summary=context.get("summary"),
-            recent_memories=recent_memories
-        ):
+        # 使用 ChatSubAgent 继续生成
+        from app.agents.state import ChatSubAgentState
+
+        chat_state: ChatSubAgentState = {
+            "messages": [],
+            "user_id": user_id,
+            "session_id": session_id,
+            "user_profile": profile_dict,
+            "user_message": f"[继续生成] 之前的回复已经生成了以下内容：{existing_content}。请继续生成剩余的回复内容。如果之前的回复已经完整，请回复'继续内容已结束'。",
+            "history": history_dicts,
+            "context_summary": context.get("summary"),
+            "recent_memories": recent_memories,
+            "response": None,
+            "stream_chunks": [],
+            "error_message": None
+        }
+
+        async for chunk in self.chat_sub_agent.stream(chat_state):
             if chunk["type"] == "chunk":
                 full_content += chunk["content"]
                 yield chunk
@@ -290,6 +319,8 @@ class AIService:
         """
         生成训练计划（非流式）
 
+        **DEPRECATED**: 请使用 stream_chat 发送"生成计划"类消息
+
         Args:
             user_id: 用户ID
             preferences: 额外偏好设置
@@ -323,8 +354,22 @@ class AIService:
                 # 可以在这里添加更多偏好处理
                 pass
 
-        # 生成计划
-        result = await self.workout_agent.generate_sync(user_id, profile_dict)
+        # 生成计划（通过 WorkoutSubAgent）
+        from app.agents.state import WorkoutSubAgentState
+
+        workout_state: WorkoutSubAgentState = {
+            "messages": [],
+            "user_id": user_id,
+            "user_profile": profile_dict,
+            "extracted_preferences": preferences or {},
+            "workout_plan": None,
+            "plan_json_str": None,
+            "validation_passed": False,
+            "stream_chunks": [],
+            "error_message": None
+        }
+
+        result = await self.workout_sub_agent.process(workout_state)
 
         if result.get("success") and result.get("plan"):
             # 保存到数据库
@@ -361,6 +406,8 @@ class AIService:
         """
         流式生成训练计划
 
+        **DEPRECATED**: 请使用 stream_chat 发送"生成计划"类消息
+
         Yields:
             dict: 包含流式数据和最终计划
         """
@@ -389,7 +436,22 @@ class AIService:
 
         workout_plan = None
 
-        async for chunk in self.workout_agent.generate(user_id, profile_dict):
+        # 使用 WorkoutSubAgent 流式生成
+        from app.agents.state import WorkoutSubAgentState
+
+        workout_state: WorkoutSubAgentState = {
+            "messages": [],
+            "user_id": user_id,
+            "user_profile": profile_dict,
+            "extracted_preferences": preferences or {},
+            "workout_plan": None,
+            "plan_json_str": None,
+            "validation_passed": False,
+            "stream_chunks": [],
+            "error_message": None
+        }
+
+        async for chunk in self.workout_sub_agent.stream(workout_state):
             if chunk["type"] == "plan":
                 workout_plan = chunk["plan"]
             yield chunk

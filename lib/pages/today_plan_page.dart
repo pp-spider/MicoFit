@@ -386,19 +386,19 @@ class _StreakBadge extends StatelessWidget {
                         width: 32,
                         height: 32,
                         child: CircularProgressIndicator(
-                          value: (streakDays % 7) / 7,
+                          value: streakDays >= 7 ? 1.0 : streakDays / 7,
                           strokeWidth: 3,
                           backgroundColor: const Color(0xFFE5E7EB),
-                          valueColor: const AlwaysStoppedAnimation<Color>(
-                            Color(0xFF2DD4BF),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            streakDays >= 7 ? const Color(0xFF10B981) : const Color(0xFF2DD4BF),
                           ),
                         ),
                       ),
-                      const Center(
+                      Center(
                         child: Icon(
                           Icons.local_fire_department,
                           size: 14,
-                          color: Color(0xFF2DD4BF),
+                          color: streakDays >= 7 ? const Color(0xFF10B981) : const Color(0xFF2DD4BF),
                         ),
                       ),
                     ],
