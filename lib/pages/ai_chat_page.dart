@@ -766,7 +766,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                       ],
                     ),
                     child: isEmptyAI && isStreaming
-                        ? _buildTypingAnimationInline()
+                        ? _buildAgentIndicatorInBubble(chatProvider)
                         : (isStreaming && !isUser
                             ? _buildStreamingContent(message.content)
                             : _buildMessageContent(message.content, isUser)),
@@ -940,6 +940,95 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
           ),
         );
       },
+    );
+  }
+
+  /// 消息气泡内的 Agent 状态指示器（替代原来的打字动画）
+  Widget _buildAgentIndicatorInBubble(ChatProvider chatProvider) {
+    final agents = chatProvider.activeAgents;
+
+    if (agents.isEmpty) {
+      // 如果没有 agent 在执行，显示默认的打字动画
+      return _buildTypingAnimationInline();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Agent 状态指示器列表
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: agents.map((agent) => _buildAgentChip(agent)).toList(),
+        ),
+      ],
+    );
+  }
+
+  /// 单个 Agent 状态 Chip
+  Widget _buildAgentChip(AgentExecutionStatus agent) {
+    // 根据 agent 类型和任务类型显示不同的文案
+    String label;
+    IconData icon;
+    final isActive = agent.isActive;
+
+    switch (agent.agent) {
+      case 'workout_sub_agent':
+        label = isActive ? '生成训练计划中...' : '训练计划已生成';
+        icon = Icons.fitness_center;
+        break;
+      case 'chat_sub_agent':
+        label = isActive ? 'AI 思考中...' : '已响应';
+        icon = Icons.psychology;
+        break;
+      default:
+        label = isActive ? '处理中...' : '已完成';
+        icon = Icons.hourglass_empty;
+    }
+
+    // 已完成状态使用不同的颜色
+    final Color chipColor = isActive
+        ? const Color(0xFF8B5CF6)
+        : const Color(0xFF10B981); // 绿色表示完成
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: chipColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: chipColor.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isActive) ...[
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(chipColor),
+              ),
+            ),
+          ] else ...[
+            Icon(Icons.check_circle, size: 14, color: chipColor),
+          ],
+          const SizedBox(width: 6),
+          Icon(icon, size: 14, color: chipColor),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: chipColor,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

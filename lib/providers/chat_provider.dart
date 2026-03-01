@@ -19,6 +19,28 @@ enum ChatStreamStatus {
   error, // 发生错误
 }
 
+/// Agent 执行状态
+class AgentExecutionStatus {
+  final String agent;
+  final String taskType;
+  final bool isActive; // true = 执行中, false = 已完成
+
+  AgentExecutionStatus({
+    required this.agent,
+    required this.taskType,
+    required this.isActive,
+  });
+
+  /// 创建已完成状态
+  AgentExecutionStatus copyWithCompleted() {
+    return AgentExecutionStatus(
+      agent: agent,
+      taskType: taskType,
+      isActive: false,
+    );
+  }
+}
+
 /// 聊天状态管理（后端 API 版本）
 ///
 /// 职责：
@@ -88,6 +110,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 是否正在加载会话列表
   bool _isLoadingSessions = false;
 
+  /// 当前执行中的 Agent 列表
+  final List<AgentExecutionStatus> _activeAgents = [];
+
   // ========== Getters ==========
 
   /// 获取会话列表
@@ -98,6 +123,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   /// 会话列表是否为空
   bool get hasNoSessions => _sessions.isEmpty;
+
+  /// 当前执行中的 Agent 列表
+  List<AgentExecutionStatus> get activeAgents => List.unmodifiable(_activeAgents);
 
   List<ChatMessage> get messages => List.unmodifiable(_messages);
   ChatStreamStatus get streamStatus => _streamStatus;
@@ -232,6 +260,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // 1. 取消之前的流式请求
     await _cancelStream();
 
+    // 清理之前的 agent 状态（开始新的对话）
+    _activeAgents.clear();
+
     // 2. 如果没有当前会话，先创建一个新会话（空状态首次发送消息）
     if (_currentSessionId == null) {
       debugPrint('[ChatProvider] 没有会话，创建新会话');
@@ -277,9 +308,56 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       await for (final chunk in stream) {
         switch (chunk.type) {
+          case AIStreamType.agentStatus:
+            // Agent 执行状态事件
+            final agent = chunk.agent;
+            final status = chunk.agentStatus;
+            final taskType = chunk.taskType;
+
+            if (agent != null && status != null && taskType != null) {
+              final existingIndex = _activeAgents.indexWhere((a) => a.agent == agent);
+
+              if (status == 'started') {
+                // Agent 开始执行，添加到列表
+                if (existingIndex == -1) {
+                  _activeAgents.add(AgentExecutionStatus(
+                    agent: agent,
+                    taskType: taskType,
+                    isActive: true,
+                  ));
+                } else {
+                  // 已存在，更新为执行中
+                  _activeAgents[existingIndex] = AgentExecutionStatus(
+                    agent: agent,
+                    taskType: taskType,
+                    isActive: true,
+                  );
+                }
+              } else if (status == 'completed') {
+                // Agent 执行完成，标记为已完成（不删除，保持显示）
+                if (existingIndex != -1) {
+                  _activeAgents[existingIndex] = _activeAgents[existingIndex].copyWithCompleted();
+                } else {
+                  // 如果不存在，直接添加为已完成状态
+                  _activeAgents.add(AgentExecutionStatus(
+                    agent: agent,
+                    taskType: taskType,
+                    isActive: false,
+                  ));
+                }
+              }
+              notifyListeners();
+            }
+            break;
+
           case AIStreamType.chunk:
-            // 文本流块
-            if (chunk.content != null) {
+            // 文本流块 - 需要过滤 workout_agent 的输出
+            // 检查当前是否有 workout_agent 在执行
+            final hasWorkoutAgent = _activeAgents.any(
+              (a) => a.agent == 'workout_sub_agent' && a.isActive,
+            );
+            // 如果 workout_agent 正在执行，不显示其 chunk 输出
+            if (!hasWorkoutAgent && chunk.content != null) {
               _streamingBuffer!.write(chunk.content);
               _throttleUpdate();
             }
@@ -504,6 +582,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// 重置流式状态
+  /// 注意：不清理 _activeAgents，保持显示所有 agent 的状态
   void _resetStreamingState() {
     _streamingMessageId = null;
     _streamingBuffer = null;

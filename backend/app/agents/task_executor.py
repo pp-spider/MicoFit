@@ -153,6 +153,15 @@ class TaskExecutor:
         # 更新状态为运行中
         task["status"] = TaskStatus.RUNNING
 
+        # yield agent 开始状态事件
+        yield {
+            "type": "agent_status",
+            "agent": agent_name,
+            "status": "started",
+            "task_type": task_type,
+            "task_id": task_id
+        }
+
         try:
             # 获取对应的 Agent
             agent = self.agent_registry.get(agent_name)
@@ -302,6 +311,15 @@ class TaskExecutor:
             # 标记完成
             task["status"] = TaskStatus.COMPLETED
             logger.info(f"任务完成: {task_id}")
+
+            # yield agent 完成状态事件
+            yield {
+                "type": "agent_status",
+                "agent": agent_name,
+                "status": "completed",
+                "task_type": task_type,
+                "task_id": task_id
+            }
 
             # 任务完成后 yield Task 对象
             yield task

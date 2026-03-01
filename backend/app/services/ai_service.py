@@ -209,6 +209,10 @@ class AIService:
                     "session_id": session_id,
                     "has_plan": workout_plan is not None
                 }
+            elif chunk["type"] == "agent_status":
+                # Agent 状态事件，透传到前端
+                logger.info(f"Agent 状态: {chunk.get('agent')} - {chunk.get('status')}")
+                yield chunk
             elif chunk["type"] == "error":
                 logger.error(f"PlannerAgent 错误: {chunk.get('message')}")
                 yield chunk

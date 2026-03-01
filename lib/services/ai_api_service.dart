@@ -15,6 +15,10 @@ class AIStreamChunk {
   final String? planId;
   final bool? hasPlan;
   final String? message;
+  // Agent 状态相关字段
+  final String? agent;
+  final String? agentStatus;
+  final String? taskType;
 
   AIStreamChunk({
     required this.type,
@@ -24,6 +28,9 @@ class AIStreamChunk {
     this.planId,
     this.hasPlan,
     this.message,
+    this.agent,
+    this.agentStatus,
+    this.taskType,
   });
 
   factory AIStreamChunk.fromJson(Map<String, dynamic> json) {
@@ -37,6 +44,9 @@ class AIStreamChunk {
       planId: json['plan_id'] as String?,
       hasPlan: json['has_plan'] as bool?,
       message: json['message'] as String?,
+      agent: json['agent'] as String?,
+      agentStatus: json['status'] as String?,
+      taskType: json['task_type'] as String?,
     );
   }
 }
@@ -49,6 +59,7 @@ enum AIStreamType {
   error, // 错误
   sessionCreated, // 新会话创建
   saved, // 计划已保存
+  agentStatus, // Agent 执行状态
   unknown;
 
   factory AIStreamType.fromString(String type) {
@@ -65,6 +76,8 @@ enum AIStreamType {
         return AIStreamType.sessionCreated;
       case 'saved':
         return AIStreamType.saved;
+      case 'agent_status':
+        return AIStreamType.agentStatus;
       default:
         return AIStreamType.unknown;
     }
