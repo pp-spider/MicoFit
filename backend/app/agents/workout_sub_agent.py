@@ -449,79 +449,124 @@ class WorkoutSubAgent(BaseSubAgent):
         # 初始化重试计数
         state["retry_count"] = 0
 
-        # 构建提示词
-        state = self._build_prompt_node(state)
+        # 最大重试次数
+        max_retries = 3
+        current_retry = 0
 
-        # 发送准备消息
-        # 美化输出开始
-        print("\n" + "─"*50)
-        print("🏋️ WorkoutSubAgent 正在生成训练计划...")
-        print("─"*50 + "\n")
+        while current_retry <= max_retries:
+            # 构建提示词
+            state = self._build_prompt_node(state)
 
-        yield {
-            "type": "chunk",
-            "content": "正在为您生成今日训练计划...\n\n"
-        }
-
-        try:
-            messages = state["messages"]
-            full_content = ""
-
-            # 流式生成
-            async for chunk in self.llm.astream(messages):
-                if chunk.content:
-                    full_content += chunk.content
-                    yield {
-                        "type": "chunk",
-                        "content": chunk.content
-                    }
-
-            # 解析
-            state["plan_json_str"] = full_content
-            state = self._parse_node(state)
-
-            # 验证
-            state = self._validate_node(state)
-
-            if state.get("validation_passed"):
-                plan = state["workout_plan"]
-                plan["generated_at"] = datetime.utcnow().isoformat()
-                plan["generated_by"] = "ai"
-
-                # 美化输出验证成功
+            # 发送准备消息
+            if current_retry == 0:
                 print("\n" + "─"*50)
-                print("✅ 训练计划生成成功!")
-                print(f"   计划标题: {plan.get('title')}")
-                print(f"   总时长: {plan.get('total_duration')} 分钟")
-                print(f"   训练模块: {len(plan.get('modules', []))} 个")
+                print("🏋️ WorkoutSubAgent 正在生成训练计划...")
                 print("─"*50 + "\n")
 
                 yield {
-                    "type": "plan",
-                    "plan": plan
-                }
-                yield {
-                    "type": "done",
-                    "has_plan": True
+                    "type": "chunk",
+                    "content": "正在为您生成今日训练计划...\n\n"
                 }
             else:
-                # 美化输出验证失败
                 print("\n" + "─"*50)
-                print("❌ 训练计划验证失败")
-                print(f"   错误: {state.get('error_message')}")
+                print(f"🔄 第 {current_retry} 次重试...")
                 print("─"*50 + "\n")
 
                 yield {
-                    "type": "error",
-                    "message": state.get("error_message", "计划验证失败")
+                    "type": "chunk",
+                    "content": f"\n解析失败，正在重新生成（第 {current_retry}/{max_retries} 次）...\n\n"
                 }
 
-        except Exception as e:
-            logger.error(f"WorkoutSubAgent 生成失败: {e}")
-            yield {
-                "type": "error",
-                "message": f"生成计划时出错: {str(e)}"
-            }
+            try:
+                messages = state["messages"]
+                full_content = ""
+
+                # 流式生成
+                async for chunk in self.llm.astream(messages):
+                    if chunk.content:
+                        full_content += chunk.content
+                        yield {
+                            "type": "chunk",
+                            "content": chunk.content
+                        }
+
+                # 解析
+                state["plan_json_str"] = full_content
+                state = self._parse_node(state)
+
+                # 验证
+                state = self._validate_node(state)
+
+                if state.get("validation_passed"):
+                    plan = state["workout_plan"]
+                    plan["generated_at"] = datetime.utcnow().isoformat()
+                    plan["generated_by"] = "ai"
+
+                    # 美化输出验证成功
+                    print("\n" + "─"*50)
+                    print("✅ 训练计划生成成功!")
+                    print(f"   计划标题: {plan.get('title')}")
+                    print(f"   总时长: {plan.get('total_duration')} 分钟")
+                    print(f"   训练模块: {len(plan.get('modules', []))} 个")
+                    print("─"*50 + "\n")
+
+                    yield {
+                        "type": "plan",
+                        "plan": plan
+                    }
+                    yield {
+                        "type": "done",
+                        "has_plan": True
+                    }
+                    return  # 成功结束
+
+                # 验证失败，准备重试
+                error_msg = state.get("error_message", "计划验证失败")
+                print("\n" + "─"*50)
+                print(f"⚠️ 第 {current_retry + 1} 次验证失败")
+                print(f"   错误: {error_msg}")
+                print("─"*50 + "\n")
+
+                # 检查是否还能重试
+                if current_retry < max_retries:
+                    current_retry += 1
+
+                    # 调用重试节点生成修正的 prompt
+                    state = await self._retry_node(state)
+
+                    if state.get("error_message"):
+                        # 重试节点也失败了
+                        print("\n" + "─"*50)
+                        print("❌ 重试修正失败")
+                        print(f"   错误: {state.get('error_message')}")
+                        print("─"*50 + "\n")
+                        yield {
+                            "type": "error",
+                            "message": state.get("error_message")
+                        }
+                        return
+
+                    # 继续循环重试
+                    continue
+                else:
+                    # 超过最大重试次数
+                    print("\n" + "─"*50)
+                    print("❌ 训练计划验证失败（已达最大重试次数）")
+                    print("─"*50 + "\n")
+
+                    yield {
+                        "type": "error",
+                        "message": f"验证失败，已重试 {max_retries} 次: {error_msg}"
+                    }
+                    return
+
+            except Exception as e:
+                logger.error(f"WorkoutSubAgent 生成失败: {e}")
+                yield {
+                    "type": "error",
+                    "message": f"生成计划时出错: {str(e)}"
+                }
+                return
 
     async def process(self, state: WorkoutSubAgentState) -> dict:
         """

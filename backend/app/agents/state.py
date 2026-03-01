@@ -124,3 +124,42 @@ class WorkoutSubAgentState(TypedDict):
     # 输出
     stream_chunks: list[str]
     error_message: str | None
+
+
+# ============================================================================
+# Planner Agent 状态定义
+# ============================================================================
+
+class PlannerState(TypedDict):
+    """
+    PlannerAgent 状态 - Planner 架构全局状态
+
+    包含：
+    - 用户信息
+    - 任务分析结果
+    - 执行计划
+    - 任务执行结果
+    - 共享上下文
+    """
+    # 用户信息
+    user_id: str
+    session_id: str
+    user_message: str
+    user_profile: dict | None
+    history: list[dict] | None
+    context_summary: str | None
+    recent_memories: list[str] | None
+
+    # 任务分析
+    task_analysis: dict | None
+
+    # 执行计划
+    execution_plan: dict | None
+
+    # 执行结果
+    tasks: list[dict]
+    shared_context: dict
+
+    # 输出
+    final_response: str | None
+    error_message: str | None

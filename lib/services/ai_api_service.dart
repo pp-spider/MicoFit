@@ -100,11 +100,14 @@ class AIApiService {
 
     request.headers['Content-Type'] = 'application/json';
     request.headers['Accept'] = 'text/event-stream';
+    request.headers['Accept-Encoding'] = 'gzip, deflate';
 
     request.body = jsonEncode({
       'session_id': sessionId,
       'message': message,
     });
+
+    StringBuffer dataBuffer = StringBuffer();
 
     try {
       final response = await http.Client().send(request);
@@ -114,18 +117,51 @@ class AIApiService {
         throw Exception('聊天请求失败: ${response.statusCode} - $body');
       }
 
-      // 解析 SSE 流
+      // 解析 SSE 流 - 改进版，支持多行 data 和 event 事件
       await for (final line in response.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())) {
+        // 处理空行（消息分隔符）
+        if (line.isEmpty) {
+          if (dataBuffer.isNotEmpty) {
+            final dataStr = dataBuffer.toString().trim();
+            if (dataStr.startsWith('{')) {
+              try {
+                final data = jsonDecode(dataStr) as Map<String, dynamic>;
+                yield AIStreamChunk.fromJson(data);
+              } catch (e) {
+                // 忽略解析错误
+              }
+            }
+            dataBuffer = StringBuffer();
+          }
+          continue;
+        }
+
+        // 处理 event: 行（可以忽略，因为 data 中已包含 type）
+        if (line.startsWith('event: ')) {
+          continue;
+        }
+
+        // 处理 data: 行
         if (line.startsWith('data: ')) {
+          final dataContent = line.substring(6);
+          dataBuffer.write(dataContent);
+          continue;
+        }
+
+        // 其他行忽略
+      }
+
+      // 处理最后剩余的数据
+      if (dataBuffer.isNotEmpty) {
+        final dataStr = dataBuffer.toString().trim();
+        if (dataStr.startsWith('{')) {
           try {
-            final data =
-                jsonDecode(line.substring(6)) as Map<String, dynamic>;
+            final data = jsonDecode(dataStr) as Map<String, dynamic>;
             yield AIStreamChunk.fromJson(data);
           } catch (e) {
-            // 忽略解析错误，继续处理下一行
-            continue;
+            // 忽略解析错误
           }
         }
       }
@@ -157,11 +193,14 @@ class AIApiService {
 
     request.headers['Content-Type'] = 'application/json';
     request.headers['Accept'] = 'text/event-stream';
+    request.headers['Accept-Encoding'] = 'gzip, deflate';
 
     request.body = jsonEncode({
       'session_id': sessionId,
       'existing_content': existingContent,
     });
+
+    StringBuffer dataBuffer = StringBuffer();
 
     try {
       final response = await http.Client().send(request);
@@ -171,17 +210,47 @@ class AIApiService {
         throw Exception('继续生成请求失败: ${response.statusCode} - $body');
       }
 
-      // 解析 SSE 流
+      // 解析 SSE 流 - 改进版
       await for (final line in response.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())) {
+        // 处理空行（消息分隔符）
+        if (line.isEmpty) {
+          if (dataBuffer.isNotEmpty) {
+            final dataStr = dataBuffer.toString().trim();
+            if (dataStr.startsWith('{')) {
+              try {
+                final data = jsonDecode(dataStr) as Map<String, dynamic>;
+                yield AIStreamChunk.fromJson(data);
+              } catch (e) {
+                // 忽略解析错误
+              }
+            }
+            dataBuffer = StringBuffer();
+          }
+          continue;
+        }
+
+        if (line.startsWith('event: ')) {
+          continue;
+        }
+
         if (line.startsWith('data: ')) {
+          final dataContent = line.substring(6);
+          dataBuffer.write(dataContent);
+          continue;
+        }
+      }
+
+      // 处理最后剩余的数据
+      if (dataBuffer.isNotEmpty) {
+        final dataStr = dataBuffer.toString().trim();
+        if (dataStr.startsWith('{')) {
           try {
-            final data =
-                jsonDecode(line.substring(6)) as Map<String, dynamic>;
+            final data = jsonDecode(dataStr) as Map<String, dynamic>;
             yield AIStreamChunk.fromJson(data);
           } catch (e) {
-            continue;
+            // 忽略解析错误
           }
         }
       }
@@ -209,8 +278,11 @@ class AIApiService {
 
     request.headers['Content-Type'] = 'application/json';
     request.headers['Accept'] = 'text/event-stream';
+    request.headers['Accept-Encoding'] = 'gzip, deflate';
 
     request.body = jsonEncode(preferences ?? {});
+
+    StringBuffer dataBuffer = StringBuffer();
 
     try {
       final response = await http.Client().send(request);
@@ -220,17 +292,47 @@ class AIApiService {
         throw Exception('生成计划请求失败: ${response.statusCode} - $body');
       }
 
-      // 解析 SSE 流
+      // 解析 SSE 流 - 改进版
       await for (final line in response.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())) {
+        // 处理空行（消息分隔符）
+        if (line.isEmpty) {
+          if (dataBuffer.isNotEmpty) {
+            final dataStr = dataBuffer.toString().trim();
+            if (dataStr.startsWith('{')) {
+              try {
+                final data = jsonDecode(dataStr) as Map<String, dynamic>;
+                yield AIStreamChunk.fromJson(data);
+              } catch (e) {
+                // 忽略解析错误
+              }
+            }
+            dataBuffer = StringBuffer();
+          }
+          continue;
+        }
+
+        if (line.startsWith('event: ')) {
+          continue;
+        }
+
         if (line.startsWith('data: ')) {
+          final dataContent = line.substring(6);
+          dataBuffer.write(dataContent);
+          continue;
+        }
+      }
+
+      // 处理最后剩余的数据
+      if (dataBuffer.isNotEmpty) {
+        final dataStr = dataBuffer.toString().trim();
+        if (dataStr.startsWith('{')) {
           try {
-            final data =
-                jsonDecode(line.substring(6)) as Map<String, dynamic>;
+            final data = jsonDecode(dataStr) as Map<String, dynamic>;
             yield AIStreamChunk.fromJson(data);
           } catch (e) {
-            continue;
+            // 忽略解析错误
           }
         }
       }

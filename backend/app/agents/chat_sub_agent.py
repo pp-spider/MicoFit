@@ -93,6 +93,7 @@ class ChatSubAgent(BaseSubAgent):
             context_summary=state.get("context_summary"),
             recent_memories=state.get("recent_memories")
         )
+
         messages.append(SystemMessage(content=system_prompt))
 
         # 历史消息

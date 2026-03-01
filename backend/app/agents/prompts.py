@@ -237,16 +237,42 @@ def _get_scene_label(scene: str) -> str:
     return mapping.get(scene, scene)
 
 
-def _get_equipment_label(equipment: str) -> str:
-    """获取装备标签"""
+def _get_equipment_label(equipment) -> str:
+    """获取装备标签
+
+    Args:
+        equipment: 装备，可以是字符串或列表
+
+    Returns:
+        str: 标签字符串
+    """
     mapping = {
         "none": "无需装备",
         "mat": "瑜伽垫",
         "chair": "椅子",
         "towel": "毛巾",
         "resistance_band": "弹力带",
-        "small_weights": "小哑铃"
+        "small_weights": "小哑铃",
+        "徒手": "无需装备",
+        "弹力带": "弹力带",
+        "瑜伽垫": "瑜伽垫",
+        "哑铃": "小哑铃"
     }
+
+    # 处理列表类型
+    if isinstance(equipment, list):
+        labels = []
+        for eq in equipment:
+            if eq in mapping:
+                labels.append(mapping[eq])
+            else:
+                labels.append(eq)
+        return "、".join(labels) if labels else "未知"
+
+    # 处理字符串类型
+    if not equipment:
+        return "未知"
+
     return mapping.get(equipment, equipment)
 
 
@@ -358,6 +384,186 @@ def build_intent_recognition_prompt(user_message: str, user_profile: dict | None
         "intensity": "low",
         "equipment": null
     }}
+}}
+```
+
+请分析以下用户消息：
+"""
+
+    return prompt_template.format(profile_info=profile_info) + user_message
+
+
+# ============================================================================
+# Planner Agent 多意图识别 Prompt
+# ============================================================================
+
+def build_multi_intent_prompt(user_message: str, user_profile: dict | None = None) -> str:
+    """
+    构建多意图识别提示词 - 用于 Planner Agent
+
+    识别用户消息中的所有意图，支持复杂多步骤任务。
+
+    Args:
+        user_message: 用户消息
+        user_profile: 用户画像信息
+
+    Returns:
+        str: 多意图识别提示词
+    """
+    profile_info = ""
+    if user_profile:
+        profile_info = f"""
+**用户画像信息：**
+- 健身水平：{_get_fitness_level_label(user_profile.get('fitness_level', ''))}
+- 健身目标：{_get_goal_label(user_profile.get('goal', ''))}
+- 常用场景：{_get_scene_label(user_profile.get('scene', ''))}
+- 时间预算：{user_profile.get('time_budget', 12)}分钟
+"""
+
+    prompt_template = """你是微动MicoFit的任务分析助手。你的任务是分析用户消息，识别所有可能的意图。
+
+{profile_info}
+
+## 任务类型定义
+
+1. **workout** - 训练计划相关
+   - 生成计划、调整计划、换计划
+   - 部位训练、场景训练、时间训练
+   - 强度调整
+   - 示例："今天练什么"、"给我一个计划"、"换个腿部的"
+
+2. **chat** - 普通对话
+   - 健身知识问答、动作咨询
+   - 闲聊、感谢、问候
+   - 示例："深蹲怎么做"、"谢谢教练"
+
+3. **explanation** - 解释说明
+   - 解释动作、解释计划
+   - 为什么推荐这个
+   - 示例："解释一下这个动作"、"为什么要练这个"
+
+4. **feedback** - 训练反馈
+   - 反馈训练感受
+   - 调整建议
+   - 示例："今天练完好累"、"这个计划太简单了"
+
+## 复杂度定义
+
+- **simple**: 单意图，如"今天练什么？"
+- **medium**: 2个相关意图，如"给我一个计划并解释一下"
+- **complex**: 多个意图或复杂依赖，如"制定计划并解释每个动作，然后根据我的反馈调整"
+
+## 输出格式
+
+请严格按以下JSON格式输出：
+
+```json
+{{
+    "intents": ["workout", "explanation"],
+    "primary_intent": "workout",
+    "complexity": "complex",
+    "confidence": 0.95,
+    "reasoning": "用户先要求生成计划，然后要求解释动作，所以有2个意图",
+    "entities": {{
+        "focus_body_part": null,
+        "scene": null,
+        "duration": null,
+        "intensity": null
+    }},
+    "sub_tasks": [
+        {{
+            "type": "workout",
+            "description": "生成训练计划",
+            "input_data": {{}},
+            "depends_on": []
+        }},
+        {{
+            "type": "explanation",
+            "description": "解释计划中的每个动作",
+            "input_data": {{"plan_reference": "task_0"}},
+            "depends_on": ["task_0"]
+        }}
+    ]
+}}
+```
+
+## 任务依赖规则
+
+- 如果某个任务需要另一个任务的输出，在 depends_on 中指定依赖的任务ID
+- 例如：解释任务依赖生成的计划，所以 depends_on: ["task_0"]
+- 如果没有依赖，depends_on: []
+
+## 示例
+
+用户消息："制定训练计划并解释每个动作"
+```json
+{{
+    "intents": ["workout", "explanation"],
+    "primary_intent": "workout",
+    "complexity": "complex",
+    "confidence": 0.95,
+    "reasoning": "用户要求生成计划并解释动作，是两个有依赖关系的任务",
+    "entities": {{}},
+    "sub_tasks": [
+        {{
+            "type": "workout",
+            "description": "生成训练计划",
+            "input_data": {{}},
+            "depends_on": []
+        }},
+        {{
+            "type": "explanation",
+            "description": "解释计划中的每个动作",
+            "input_data": {{"plan_reference": "task_0"}},
+            "depends_on": ["task_0"]
+        }}
+    ]
+}}
+```
+
+用户消息："给我一个计划，再聊聊增肌"
+```json
+{{
+    "intents": ["workout", "chat"],
+    "primary_intent": "workout",
+    "complexity": "medium",
+    "confidence": 0.9,
+    "reasoning": "用户要求生成计划并讨论增肌，两个独立任务可以并行",
+    "entities": {{}},
+    "sub_tasks": [
+        {{
+            "type": "workout",
+            "description": "生成训练计划",
+            "input_data": {{}},
+            "depends_on": []
+        }},
+        {{
+            "type": "chat",
+            "description": "讨论增肌知识",
+            "input_data": {{"topic": "增肌"}},
+            "depends_on": []
+        }}
+    ]
+}}
+```
+
+用户消息："今天练什么？"
+```json
+{{
+    "intents": ["workout"],
+    "primary_intent": "workout",
+    "complexity": "simple",
+    "confidence": 0.95,
+    "reasoning": "用户只是询问今天的训练计划",
+    "entities": {{}},
+    "sub_tasks": [
+        {{
+            "type": "workout",
+            "description": "生成今日训练计划",
+            "input_data": {{}},
+            "depends_on": []
+        }}
+    ]
 }}
 ```
 

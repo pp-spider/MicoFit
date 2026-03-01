@@ -8,6 +8,9 @@ from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
+# 优先使用 PlannerAgent，支持复杂多任务处理
+# 如果需要降级到简单模式，可以使用 RouterAgent
+from app.agents.planner_agent import PlannerAgent
 from app.agents.router_agent import RouterAgent
 from app.agents.chat_sub_agent import ChatSubAgent
 from app.agents.workout_sub_agent import WorkoutSubAgent
@@ -23,7 +26,10 @@ class AIService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.router_agent = RouterAgent()  # 主入口：RouterAgent
+        # 使用 PlannerAgent 作为主入口，支持复杂多任务处理
+        self.planner_agent = PlannerAgent()
+        # 保留 RouterAgent 作为降级备用
+        self.router_agent = RouterAgent()
         self.chat_sub_agent = ChatSubAgent()  # 用于 continue 功能
         self.workout_sub_agent = WorkoutSubAgent()  # 用于直接生成训练计划
         self.workout_service = WorkoutService(db)
@@ -110,11 +116,11 @@ class AIService:
                 first_message=message
             )
 
-        # 流式生成回复 - 使用 RouterAgent
+        # 流式生成回复 - 使用 PlannerAgent
         full_content = ""
         workout_plan = None
 
-        async for chunk in self.router_agent.process(
+        async for chunk in self.planner_agent.process(
             user_id=user_id,
             session_id=session_id,
             user_message=message,
@@ -123,7 +129,30 @@ class AIService:
             context_summary=context.get("summary"),
             recent_memories=recent_memories
         ):
-            if chunk["type"] == "intent":
+            # PlannerAgent 新增的事件类型
+            if chunk["type"] == "analysis":
+                # 任务分析结果
+                logger.info(
+                    f"任务分析: {chunk.get('analysis', {}).get('intents')} "
+                    f"复杂度: {chunk.get('analysis', {}).get('complexity')}"
+                )
+                yield {
+                    "type": "analysis",
+                    "analysis": chunk.get("analysis", {})
+                }
+            elif chunk["type"] == "plan_info":
+                # 执行计划信息
+                logger.info(
+                    f"执行计划: {chunk.get('execution_order')} "
+                    f"并行组: {chunk.get('parallel_groups')}"
+                )
+                yield {
+                    "type": "plan_info",
+                    "execution_order": chunk.get("execution_order"),
+                    "parallel_groups": chunk.get("parallel_groups"),
+                    "requires_collaboration": chunk.get("requires_collaboration")
+                }
+            elif chunk["type"] == "intent":
                 # 意图识别结果，可以记录日志
                 logger.info(
                     f"意图识别: {chunk.get('intent')} "
@@ -181,7 +210,7 @@ class AIService:
                     "has_plan": workout_plan is not None
                 }
             elif chunk["type"] == "error":
-                logger.error(f"RouterAgent 错误: {chunk.get('message')}")
+                logger.error(f"PlannerAgent 错误: {chunk.get('message')}")
                 yield chunk
 
     async def continue_stream_chat(
