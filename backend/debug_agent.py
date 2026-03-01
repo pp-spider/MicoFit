@@ -49,14 +49,6 @@ async def run_agent_test(user_message: str):
     """运行 Agent 测试"""
     from app.agents.planner_agent import PlannerAgent
 
-    print("\n" + "=" * 60)
-    print("🧪 PlannerAgent 调试模式")
-    print("=" * 60)
-    print(f"\n📝 用户消息: {user_message}")
-    print(f"\n👤 用户画像: {json.dumps(TEST_USER_PROFILE, ensure_ascii=False, indent=2)}")
-    print(f"\n📜 历史消息: {len(TEST_HISTORY)} 条")
-    print("=" * 60 + "\n")
-
     # 创建 Agent 实例
     agent = PlannerAgent()
 
@@ -141,49 +133,20 @@ async def run_agent_test(user_message: str):
 
 def interactive_mode():
     """交互式测试模式"""
-    print("\n" + "=" * 60)
-    print("🤖 PlannerAgent 交互式调试")
-    print("=" * 60)
-    print("命令说明:")
-    print("  - 直接输入消息进行测试")
-    print("  - :profile - 查看/修改用户画像")
-    print("  - :history - 查看历史消息")
-    print("  - :quit 或 :exit - 退出程序")
-    print("=" * 60 + "\n")
-
     # 使用全局测试数据
     global TEST_USER_PROFILE, TEST_HISTORY
 
     while True:
         try:
-            user_input = input("\n请输入测试消息: ").strip()
+            user_input = "定制2个训练计划，一个是训练腹肌，一个是训练肩膀"
 
             if not user_input:
                 continue
-
-            if user_input in [":quit", ":exit", "q"]:
-                print("退出程序")
-                break
-
-            elif user_input == ":profile":
-                print("\n当前用户画像:")
-                print(json.dumps(TEST_USER_PROFILE, ensure_ascii=False, indent=2))
-                # 可以在这里添加修改功能
-                print("\n(提示: 直接修改脚本中的 TEST_USER_PROFILE 变量)")
-
-            elif user_input == ":history":
-                print("\n历史消息:")
-                for i, msg in enumerate(TEST_HISTORY):
-                    print(f"  {i+1}. [{msg['role']}]: {msg['content'][:50]}...")
-
             else:
                 try:
                     asyncio.run(run_agent_test(user_input))
                 except Exception as e:
                     import traceback
-                    print("\n" + "=" * 50)
-                    print("❌ 错误发生!")
-                    print("=" * 50)
                     traceback.print_exc()
 
         except KeyboardInterrupt:
@@ -196,10 +159,6 @@ def interactive_mode():
 
 
 def main():
-    print("=" * 60)
-    print("🧪 PlannerAgent 调试工具")
-    print("=" * 60)
-
     # 测试单个消息
     test_messages = [
         "你好",
@@ -221,5 +180,6 @@ def main():
 if __name__ == "__main__":
     """
     定制一份训练腹肌计划，并解释每个动作训练的目标肌群
+    定制2个训练计划，一个是训练腹肌，一个是训练肩膀
     """
     main()
