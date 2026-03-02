@@ -184,12 +184,6 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// Agent 内容累积映射（用于多Agent流式输出展示）
   final Map<String, StringBuffer> _agentContentBuffers = {};
 
-  /// 总结 Agent 的内容（最终输出）- 保留用于兼容性
-  StringBuffer? _summaryContentBuffer;
-
-  /// 是否正在等待总结 - 保留用于兼容性
-  bool _isWaitingForSummary = false;
-
   /// 切换Agent展开状态
   void toggleAgentExpanded(String agentId) {
     _agentExpandedStates[agentId] = !(_agentExpandedStates[agentId] ?? true);
@@ -414,8 +408,6 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _activeAgents.clear();
     _agentExpandedStates.clear();
     _agentContentBuffers.clear();
-    _summaryContentBuffer = null;
-    _isWaitingForSummary = false;
 
     // 2. 如果没有当前会话，先创建一个新会话（空状态首次发送消息）
     if (_currentSessionId == null) {
@@ -564,7 +556,6 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                       contentItems: [AgentContentItem.typing('正在生成最终回复...')],
                     ),
                   );
-                  _isWaitingForSummary = true;
                 }
               }
               notifyListeners();
@@ -761,17 +752,23 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _updateMessageWithError('AI 未返回任何内容，请稍后重试');
       _streamStatus = ChatStreamStatus.error;
     } else {
-      // 更新消息 - 如果有计划，使用 withWorkoutPlan 创建消息
-      if (plan != null) {
-        _updateMessage(
-          ChatMessage.withWorkoutPlan(
-            content: responseContent,
-            workoutPlanJson: plan.toJson(),
-          ),
-        );
-      } else {
-        _updateMessage(ChatMessage.assistant(responseContent));
-      }
+      // 构建 AgentOutput 列表（排除 summary_agent，因为它的内容就是最终回复）
+      final agentOutputs = _activeAgents
+          .where((agent) => agent.agent != 'summary_agent')
+          .map((agent) => agent.toAgentOutput(
+                isExpanded: _agentExpandedStates[agent.agent] ?? false,
+                messageContent: _agentContentBuffers[agent.agent]?.toString(),
+              ))
+          .toList();
+
+      // 更新消息 - 包含 Agent 输出
+      _updateMessage(
+        ChatMessage.withAgentOutputs(
+          content: responseContent,
+          agentOutputs: agentOutputs,
+          workoutPlanJson: plan?.toJson(),
+        ),
+      );
     }
 
     // 保存到本地（用户数据隔离）
@@ -782,16 +779,10 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
 
-    // 标记总结Agent为完成
-    final summaryIndex = _activeAgents.indexWhere(
-      (a) => a.agent == 'summary_agent',
-    );
-    if (summaryIndex != -1) {
-      _activeAgents[summaryIndex] = _activeAgents[summaryIndex]
-          .copyWithCompleted()
-          .addContentItem(AgentContentItem.success('总结完成'));
-    }
-    _isWaitingForSummary = false;
+    // 清空 Agent 状态（内容已保存到消息中）
+    _activeAgents.clear();
+    _agentExpandedStates.clear();
+    _agentContentBuffers.clear();
 
     // 自动生成会话标题（如果是新会话且有用户消息）
     await _autoGenerateSessionTitle();
@@ -919,8 +910,6 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _activeAgents.clear();
     _agentExpandedStates.clear();
     _agentContentBuffers.clear();
-    _summaryContentBuffer = null;
-    _isWaitingForSummary = false;
     notifyListeners();
   }
 
@@ -1027,8 +1016,6 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _activeAgents.clear();
     _agentExpandedStates.clear();
     _agentContentBuffers.clear();
-    _summaryContentBuffer = null;
-    _isWaitingForSummary = false;
 
     notifyListeners();
   }

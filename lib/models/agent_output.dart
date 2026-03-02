@@ -52,6 +52,30 @@ class AgentContentItem {
   String toString() {
     return 'AgentContentItem(type: $type, text: $text, items: $items, percent: $percent)';
   }
+
+  /// 转换为 JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'type': type.name,
+      if (text != null) 'text': text,
+      if (items != null) 'items': items,
+      if (percent != null) 'percent': percent,
+    };
+  }
+
+  /// 从 JSON 创建
+  factory AgentContentItem.fromJson(Map<String, dynamic> json) {
+    final type = AgentContentType.values.firstWhere(
+      (e) => e.name == json['type'],
+      orElse: () => AgentContentType.text,
+    );
+    return AgentContentItem._(
+      type: type,
+      text: json['text'] as String?,
+      items: (json['items'] as List<dynamic>?)?.cast<String>(),
+      percent: json['percent'] as int?,
+    );
+  }
 }
 
 /// Agent 输出状态
@@ -170,5 +194,39 @@ class AgentOutput {
   @override
   String toString() {
     return 'AgentOutput(id: $id, name: $name, status: $status, contentItems: ${contentItems.length})';
+  }
+
+  /// 转换为 JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'icon': icon,
+      'status': status.name,
+      if (taskType != null) 'taskType': taskType,
+      'contentItems': contentItems.map((e) => e.toJson()).toList(),
+      'isExpanded': isExpanded,
+      if (messageContent != null) 'messageContent': messageContent,
+    };
+  }
+
+  /// 从 JSON 创建
+  factory AgentOutput.fromJson(Map<String, dynamic> json) {
+    return AgentOutput(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      icon: json['icon'] as String,
+      status: AgentStatus.values.firstWhere(
+        (e) => e.name == json['status'],
+        orElse: () => AgentStatus.completed,
+      ),
+      taskType: json['taskType'] as String?,
+      contentItems: (json['contentItems'] as List<dynamic>?)
+              ?.map((e) => AgentContentItem.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
+      isExpanded: json['isExpanded'] as bool? ?? false,
+      messageContent: json['messageContent'] as String?,
+    );
   }
 }

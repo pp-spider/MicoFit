@@ -1,3 +1,5 @@
+import 'agent_output.dart';
+
 /// 聊天消息类型
 enum ChatMessageType {
   user,    // 用户消息
@@ -46,6 +48,9 @@ class ChatMessage {
   // 会话ID（从后端获取时）
   final String? sessionId;
 
+  // Agent 执行输出（用于多 Agent 场景）
+  final List<AgentOutput>? agentOutputs;
+
   ChatMessage({
     required this.id,
     required this.type,
@@ -54,6 +59,7 @@ class ChatMessage {
     this.structuredData,
     this.dataType,
     this.sessionId,
+    this.agentOutputs,
   });
 
   /// 创建用户消息
@@ -91,6 +97,23 @@ class ChatMessage {
     );
   }
 
+  /// 创建包含Agent输出的AI消息
+  factory ChatMessage.withAgentOutputs({
+    required String content,
+    required List<AgentOutput> agentOutputs,
+    Map<String, dynamic>? workoutPlanJson,
+  }) {
+    return ChatMessage(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      type: ChatMessageType.assistant,
+      content: content,
+      timestamp: DateTime.now(),
+      structuredData: workoutPlanJson,
+      dataType: workoutPlanJson != null ? ChatMessageDataType.workoutPlan : null,
+      agentOutputs: agentOutputs,
+    );
+  }
+
   /// 从JSON创建（本地格式）
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
@@ -106,6 +129,9 @@ class ChatMessage {
             )
           : null,
       sessionId: json['sessionId'] as String?,
+      agentOutputs: (json['agentOutputs'] as List<dynamic>?)
+          ?.map((e) => AgentOutput.fromJson(e as Map<String, dynamic>))
+          .toList(),
     );
   }
 
@@ -137,6 +163,8 @@ class ChatMessage {
       if (structuredData != null) 'structuredData': structuredData,
       if (dataType != null) 'dataType': dataType!.name,
       if (sessionId != null) 'sessionId': sessionId,
+      if (agentOutputs != null)
+        'agentOutputs': agentOutputs!.map((e) => e.toJson()).toList(),
     };
   }
 
@@ -149,6 +177,7 @@ class ChatMessage {
     Map<String, dynamic>? structuredData,
     ChatMessageDataType? dataType,
     String? sessionId,
+    List<AgentOutput>? agentOutputs,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -158,6 +187,7 @@ class ChatMessage {
       structuredData: structuredData ?? this.structuredData,
       dataType: dataType ?? this.dataType,
       sessionId: sessionId ?? this.sessionId,
+      agentOutputs: agentOutputs ?? this.agentOutputs,
     );
   }
 }

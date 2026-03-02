@@ -693,10 +693,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
       );
     }
 
-    // 在消息列表末尾添加Agent状态区域（仅多Agent情况显示Accordion）
-    if (chatProvider.shouldShowAgentAccordion &&
-        chatProvider.agentOutputs.isNotEmpty) {
-      messageWidgets.add(_buildAgentMessageBubble(chatProvider));
+    // 流式输出期间，添加实时 AgentAccordion
+    if (chatProvider.isStreaming && chatProvider.agentOutputs.isNotEmpty) {
+      messageWidgets.add(_buildStreamingAgentAccordion(chatProvider));
     }
 
     return ListView.builder(
@@ -707,9 +706,8 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     );
   }
 
-  /// 多Agent消息气泡（展示所有子Agent的手风琴）
-  Widget _buildAgentMessageBubble(ChatProvider chatProvider) {
-    final isStreaming = chatProvider.isStreaming;
+  /// 流式期间的 AgentAccordion 显示
+  Widget _buildStreamingAgentAccordion(ChatProvider chatProvider) {
     final hasActiveAgents = chatProvider.agentOutputs.any(
       (agent) => agent.status == AgentStatus.running,
     );
@@ -751,7 +749,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: isStreaming && hasActiveAgents
+                      color: hasActiveAgents
                           ? const Color(0xFFDBEAFE)
                           : const Color(0xFFD1FAE5),
                       borderRadius: BorderRadius.circular(8),
@@ -759,7 +757,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (isStreaming && hasActiveAgents)
+                        if (hasActiveAgents)
                           SizedBox(
                             width: 14,
                             height: 14,
@@ -778,12 +776,12 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                           ),
                         const SizedBox(width: 8),
                         Text(
-                          isStreaming && hasActiveAgents
+                          hasActiveAgents
                               ? '⏳ 多Agent协同处理中...'
                               : '✅ Agent执行记录',
                           style: TextStyle(
                             fontSize: 13,
-                            color: isStreaming && hasActiveAgents
+                            color: hasActiveAgents
                                 ? Colors.blue[700]
                                 : Colors.green[700],
                             fontWeight: FontWeight.w500,
@@ -876,7 +874,11 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                     ),
                     child: isStreaming && !isUser
                         ? _buildStreamingContent(message.content)
-                        : _buildMessageContent(message.content, isUser),
+                        : _buildMessageContentWithAgentOutputs(
+                            message,
+                            isUser,
+                            chatProvider,
+                          ),
                   ),
                 ),
                 // 健身计划预览
@@ -996,11 +998,15 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     );
   }
 
-  /// 消息内容（支持 Markdown）
-  Widget _buildMessageContent(String content, bool isUser) {
+  /// 消息内容（支持 AgentAccordion 或 Markdown）
+  Widget _buildMessageContentWithAgentOutputs(
+    ChatMessage message,
+    bool isUser,
+    ChatProvider chatProvider,
+  ) {
     if (isUser) {
       return Text(
-        content,
+        message.content,
         style: const TextStyle(
           fontSize: 15,
           color: Colors.white,
@@ -1009,10 +1015,63 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
           fontFamily: null,
         ),
       );
-    } else {
-      final cleanContent = _removeJsonCodeBlocks(content);
-      return _buildMarkdownBody(cleanContent, isStreaming: false);
     }
+
+    // 如果消息包含 Agent 输出，使用 AgentAccordion 显示
+    if (message.agentOutputs != null && message.agentOutputs!.isNotEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Agent 状态标签
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFFD1FAE5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.check_circle,
+                  size: 14,
+                  color: Colors.green[700],
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '✅ 多Agent协同已完成',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.green[800],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // AgentAccordion 组件（历史消息不需要保存展开状态）
+          AgentAccordion(
+            agents: message.agentOutputs!,
+            onToggle: (_) {}, // 历史消息的展开状态不保存
+          ),
+          // 消息内容（总结）
+          if (message.content.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Divider(height: 1, color: Color(0xFFE5E7EB)),
+            const SizedBox(height: 12),
+            _buildMarkdownBody(
+              _removeJsonCodeBlocks(message.content),
+              isStreaming: false,
+            ),
+          ],
+        ],
+      );
+    }
+
+    // 普通消息使用 Markdown 显示
+    final cleanContent = _removeJsonCodeBlocks(message.content);
+    return _buildMarkdownBody(cleanContent, isStreaming: false);
   }
 
   /// Markdown 内容渲染器
