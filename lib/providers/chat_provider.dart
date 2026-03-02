@@ -184,6 +184,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// Agent 内容累积映射（用于多Agent流式输出展示）
   final Map<String, StringBuffer> _agentContentBuffers = {};
 
+  /// 是否有 summary_sub_agent 执行（用于区分单/多任务场景）
+  bool _hasSummaryAgent = false;
+
   /// 切换Agent展开状态
   void toggleAgentExpanded(String agentId) {
     _agentExpandedStates[agentId] = !(_agentExpandedStates[agentId] ?? true);
@@ -408,6 +411,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _activeAgents.clear();
     _agentExpandedStates.clear();
     _agentContentBuffers.clear();
+    // 重置多任务场景标志
+    _hasSummaryAgent = false;
 
     // 2. 如果没有当前会话，先创建一个新会话（空状态首次发送消息）
     if (_currentSessionId == null) {
@@ -513,6 +518,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                         .copyWithCompleted()
                         .addContentItem(AgentContentItem.success('规划完成'));
                   }
+                }
+
+                // 检测是否有 summary_sub_agent 参与（多任务场景）
+                if (agent == 'summary_sub_agent') {
+                  _hasSummaryAgent = true;
+                  debugPrint('[ChatProvider] 检测到多任务场景，将只显示 summary_sub_agent 的输出');
                 }
               } else if (status == 'completed') {
                 // Agent 执行完成，标记为已完成（不删除，保持显示）
@@ -643,12 +654,20 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             break;
 
           case AIStreamType.chunk:
-            // 文本流块 - 累积到消息buffer流式显示，同时添加到对应Agent的contentItems
+            // 文本流块 - 根据是否为多任务场景决定是否累积到消息buffer
             if (chunk.content != null) {
-              _streamingBuffer!.write(chunk.content);
-
-              // 将内容添加到对应Agent的contentItems中
               final agentId = chunk.agent;
+
+              // 判断是否应该将内容写入 streamingBuffer（消息正文）
+              // 1. 单任务场景（没有 summary_agent）：所有内容都写入
+              // 2. 多任务场景：只有 summary_sub_agent 的内容写入
+              final shouldWriteToBuffer = !_hasSummaryAgent || (agentId == 'summary_sub_agent');
+
+              if (shouldWriteToBuffer) {
+                _streamingBuffer!.write(chunk.content);
+              }
+
+              // 将内容添加到对应Agent的contentItems中（用于AgentAccordion显示）
               if (agentId != null && agentId.isNotEmpty) {
                 final agentIndex = _activeAgents.indexWhere((a) => a.agent == agentId);
                 if (agentIndex != -1) {
@@ -693,8 +712,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             break;
 
           case AIStreamType.done:
-            // 完成，传递后端返回的消息ID
-            await _handleStreamDone(receivedPlan, backendMessageId: chunk.messageId);
+            // 完成，传递后端返回的消息ID和最终内容（summary_sub_agent的输出）
+            await _handleStreamDone(
+              receivedPlan,
+              backendMessageId: chunk.messageId,
+              finalContent: chunk.content,
+            );
             return;
 
           case AIStreamType.error:
@@ -741,11 +764,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// 处理流式完成
-  Future<void> _handleStreamDone(WorkoutPlan? plan, {String? backendMessageId}) async {
+  Future<void> _handleStreamDone(WorkoutPlan? plan, {String? backendMessageId, String? finalContent}) async {
     _throttleTimer?.cancel();
     _streamStatus = ChatStreamStatus.completed;
 
-    final responseContent = _streamingBuffer.toString();
+    // 优先使用后端返回的 finalContent（summary_sub_agent 的输出），否则使用 buffer 内容
+    final responseContent = finalContent ?? _streamingBuffer.toString();
 
     if (responseContent.trim().isEmpty && plan == null) {
       // 空响应
@@ -807,6 +831,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _activeAgents.clear();
     _agentExpandedStates.clear();
     _agentContentBuffers.clear();
+
+    // 重置多任务场景标志
+    _hasSummaryAgent = false;
 
     // 自动生成会话标题（如果是新会话且有用户消息）
     await _autoGenerateSessionTitle();
@@ -968,6 +995,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _throttleTimer?.cancel();
     _throttleTimer = null;
     _resetStreamingState();
+    // 重置多任务场景标志
+    _hasSummaryAgent = false;
   }
 
   // ========== 健身计划管理 ==========
