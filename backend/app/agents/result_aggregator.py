@@ -39,13 +39,28 @@ class ResultAggregator:
         # 按执行顺序整理结果
         completed_tasks = [t for t in tasks if t.get("status") == TaskStatus.COMPLETED]
         results_by_type = {}
+        # 用于收集多计划场景下的所有计划
+        all_workout_plans = []
 
         for task in completed_tasks:
             task_type = task.get("type")
             output_data = task.get("output_data", {})
+
+            # 对于 workout 类型，收集所有计划（支持多计划场景）
+            if task_type == "workout":
+                # 从 output_data 中提取计划
+                plan = output_data.get("plan")
+                plans = output_data.get("plans", [])
+                if plans:
+                    all_workout_plans.extend(plans)
+                elif plan:
+                    all_workout_plans.append(plan)
+                # 保留最后一个 workout 任务的其他字段，但替换 plans
+                output_data = {**output_data, "plans": all_workout_plans}
+
             results_by_type[task_type] = output_data
 
-        logger.info(f"聚合结果，任务类型: {list(results_by_type.keys())}")
+        logger.info(f"聚合结果，任务类型: {list(results_by_type.keys())}, workout计划数: {len(all_workout_plans)}")
 
         # 根据任务组合选择聚合策略
         # 优先处理 summary 任务的结果（当存在 summary 任务时，使用其生成的总结）
@@ -69,13 +84,22 @@ class ResultAggregator:
         聚合训练计划 + 解释
 
         格式：解释内容 + 分隔线 + 训练计划
+        支持多个训练计划（从多个 workout 任务收集）
         """
         workout_result = results.get("workout", {})
         explanation_result = results.get("explanation", {})
 
         workout_content = workout_result.get("content", "")
         explanation_content = explanation_result.get("content", "")
-        plan = workout_result.get("plan")
+        # 收集所有 workout 计划（支持多计划场景）
+        plans = workout_result.get("plans", [])
+        if not plans:
+            # 向后兼容：单个 plan 字段
+            single_plan = workout_result.get("plan")
+            if single_plan:
+                plans = [single_plan]
+        # 取第一个作为主 plan（向后兼容）
+        plan = plans[0] if plans else None
 
         # 构建内容：解释在前，计划在后
         if explanation_content and plan:
@@ -89,6 +113,7 @@ class ResultAggregator:
             type="workout_with_explanation",
             content=content,
             plan=plan,
+            plans=plans if len(plans) > 1 else None,  # 多计划场景
             response_format="markdown_with_json",
             tasks_output=results
         )
@@ -98,13 +123,22 @@ class ResultAggregator:
         聚合训练计划 + 对话
 
         格式：对话内容 + 分隔线 + 训练计划
+        支持多个训练计划（从多个 workout 任务收集）
         """
         workout_result = results.get("workout", {})
         chat_result = results.get("chat", {})
 
         workout_content = workout_result.get("content", "")
         chat_content = chat_result.get("content", "")
-        plan = workout_result.get("plan")
+        # 收集所有 workout 计划（支持多计划场景）
+        plans = workout_result.get("plans", [])
+        if not plans:
+            # 向后兼容：单个 plan 字段
+            single_plan = workout_result.get("plan")
+            if single_plan:
+                plans = [single_plan]
+        # 取第一个作为主 plan（向后兼容）
+        plan = plans[0] if plans else None
 
         # 构建内容：对话在前，计划在后
         if chat_content and plan:
@@ -118,6 +152,7 @@ class ResultAggregator:
             type="workout_with_chat",
             content=content,
             plan=plan,
+            plans=plans if len(plans) > 1 else None,  # 多计划场景
             response_format="markdown_with_json",
             tasks_output=results
         )
@@ -145,16 +180,25 @@ class ResultAggregator:
         )
 
     def _aggregate_simple_workout(self, results: dict) -> AggregatedResult:
-        """聚合单个训练计划任务"""
+        """聚合单个训练计划任务，支持多计划"""
         workout_result = results.get("workout", {})
 
         content = workout_result.get("content", "")
-        plan = workout_result.get("plan")
+        # 收集所有 workout 计划（支持多计划场景）
+        plans = workout_result.get("plans", [])
+        if not plans:
+            # 向后兼容：单个 plan 字段
+            single_plan = workout_result.get("plan")
+            if single_plan:
+                plans = [single_plan]
+        # 取第一个作为主 plan（向后兼容）
+        plan = plans[0] if plans else None
 
         return AggregatedResult(
             type="workout",
             content=content,
             plan=plan,
+            plans=plans if len(plans) > 1 else None,  # 多计划场景
             response_format="markdown_with_json",
             tasks_output=results
         )
@@ -201,7 +245,7 @@ class ResultAggregator:
         聚合 summary 任务的结果
 
         当存在 summary 任务时，优先使用其生成的总结内容作为最终结果。
-        同时保留 workout 计划（如果有的话）。
+        同时保留 workout 计划（如果有的话），支持多计划场景。
         """
         summary_result = results.get("summary", {})
         workout_result = results.get("workout", {})
@@ -209,8 +253,19 @@ class ResultAggregator:
         # 使用 summary 的内容作为最终回复
         content = summary_result.get("content", "")
 
-        # 如果存在 workout 计划，保留它
-        plan = workout_result.get("plan") if workout_result else None
+        # 如果存在 workout 计划，收集所有计划（支持多计划场景）
+        plans = []
+        if workout_result:
+            # 优先检查 plans 列表
+            plans = workout_result.get("plans", [])
+            if not plans:
+                # 向后兼容：单个 plan 字段
+                single_plan = workout_result.get("plan")
+                if single_plan:
+                    plans = [single_plan]
+
+        # 取第一个作为主 plan（向后兼容）
+        plan = plans[0] if plans else None
 
         # 确定结果类型
         if plan:
@@ -224,6 +279,7 @@ class ResultAggregator:
             type=result_type,
             content=content,
             plan=plan,
+            plans=plans if len(plans) > 1 else None,  # 多计划场景
             response_format=response_format,
             tasks_output=results
         )

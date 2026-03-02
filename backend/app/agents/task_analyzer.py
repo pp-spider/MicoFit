@@ -99,7 +99,12 @@ class TaskAnalyzer:
             result = self._parse_json_response(content)
 
             if result:
-                logger.info(f"多意图识别成功: {result.get('intents')}, 复杂度: {result.get('complexity')}")
+                sub_tasks = result.get("sub_tasks", [])
+                workout_count = sum(1 for st in sub_tasks if st.get("type") == "workout")
+                logger.info(f"[TaskAnalyzer] 多意图识别成功: {result.get('intents')}, 复杂度: {result.get('complexity')}")
+                logger.info(f"[TaskAnalyzer] 子任务数: {len(sub_tasks)}, workout任务数: {workout_count}")
+                for i, st in enumerate(sub_tasks):
+                    logger.info(f"[TaskAnalyzer] 子任务 {i}: type={st.get('type')}, desc={st.get('description')}")
                 return MultiIntentResult(
                     intents=result.get("intents", ["chat"]),
                     primary_intent=result.get("primary_intent", "chat"),

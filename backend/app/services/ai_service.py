@@ -118,7 +118,7 @@ class AIService:
 
         # 流式生成回复 - 使用 PlannerAgent
         full_content = ""
-        workout_plan = None
+        workout_plans = []  # 改为列表，支持多个训练计划
 
         async for chunk in self.planner_agent.process(
             user_id=user_id,
@@ -169,27 +169,35 @@ class AIService:
                 full_content += chunk["content"]
                 yield chunk
             elif chunk["type"] == "plan":
-                workout_plan = chunk["plan"]
+                plan_data = chunk["plan"]
                 # 保存计划到数据库
                 try:
+                    # 如果已经有计划，强制创建新记录（多计划场景）
+                    force_create = len(workout_plans) > 0
                     plan_record = await self.workout_service.create_plan(
                         user_id=user_id,
                         plan_date=date.today(),
-                        title=workout_plan["title"],
-                        subtitle=workout_plan.get("subtitle", ""),
-                        total_duration=workout_plan["total_duration"],
-                        scene=workout_plan["scene"],
-                        rpe=workout_plan["rpe"],
-                        modules=workout_plan["modules"],
-                        ai_note=workout_plan.get("ai_note"),
-                        is_applied=False
+                        title=plan_data["title"],
+                        subtitle=plan_data.get("subtitle", ""),
+                        total_duration=plan_data["total_duration"],
+                        scene=plan_data["scene"],
+                        rpe=plan_data["rpe"],
+                        modules=plan_data["modules"],
+                        ai_note=plan_data.get("ai_note"),
+                        is_applied=False,
+                        force_create=force_create
                     )
                     # 将数据库ID添加到计划数据中
-                    workout_plan["id"] = str(plan_record.id)
+                    plan_data["id"] = str(plan_record.id)
+                    # 添加到计划列表
+                    workout_plans.append(plan_data)
+                    logger.info(f"[AIService] 保存计划 {len(workout_plans)}: {plan_data['title']}, id={plan_record.id}")
                     yield {
                         "type": "plan",
-                        "plan": workout_plan,
-                        "plan_id": str(plan_record.id)
+                        "plan": plan_data,
+                        "plan_id": str(plan_record.id),
+                        "plan_index": len(workout_plans) - 1,  # 计划索引
+                        "total_plans": len(workout_plans)  # 总计划数
                     }
                 except Exception as e:
                     logger.error(f"保存计划失败: {e}")
@@ -199,18 +207,34 @@ class AIService:
                 # 多 agent 时使用 summary_sub_agent 的输出，而不是简单拼接的 full_content
                 final_content = chunk.get("content") or full_content
 
+                # 获取所有计划（从 chunk 中的 plans 字段，或本地收集的 workout_plans）
+                all_plans = chunk.get("plans", []) or workout_plans
+
                 # 保存AI回复并获取消息对象
+                # 多个计划时，保存所有计划到 structured_data 中
+                structured_data = None
+                if len(all_plans) == 1:
+                    structured_data = all_plans[0]
+                elif len(all_plans) > 1:
+                    # 多个计划时，保存为包含 plans 数组的对象
+                    structured_data = {
+                        "plans": all_plans,
+                        "primary_plan": all_plans[0]  # 保留主计划用于兼容
+                    }
+
                 message = await self.context_service.add_message_and_update_summary(
                     session_id=session_id,
                     role="assistant",
                     content=final_content,
-                    structured_data=workout_plan,
-                    data_type="workout_plan" if workout_plan else "text"
+                    structured_data=structured_data,
+                    data_type="workout_plan" if all_plans else "text"
                 )
                 yield {
                     "type": "done",
                     "session_id": session_id,
-                    "has_plan": workout_plan is not None,
+                    "has_plan": len(all_plans) > 0,
+                    "has_multiple_plans": len(all_plans) > 1,
+                    "plans_count": len(all_plans),
                     "message_id": str(message.id),  # 返回后端生成的消息ID
                     "content": final_content  # 返回最终内容给前端
                 }
@@ -285,7 +309,7 @@ class AIService:
 
         # 流式继续生成回复（传入 existing_content 作为已生成的内容）
         full_content = existing_content
-        workout_plan = None
+        workout_plans = []  # 改为列表，支持多个训练计划
 
         # 使用 ChatSubAgent 继续生成
         from app.agents.state import ChatSubAgentState
@@ -309,42 +333,59 @@ class AIService:
                 full_content += chunk["content"]
                 yield chunk
             elif chunk["type"] == "plan":
-                workout_plan = chunk["plan"]
+                plan_data = chunk["plan"]
                 # 保存计划到数据库
                 try:
                     plan_record = await self.workout_service.create_plan(
                         user_id=user_id,
                         plan_date=date.today(),
-                        title=workout_plan["title"],
-                        subtitle=workout_plan.get("subtitle", ""),
-                        total_duration=workout_plan["total_duration"],
-                        scene=workout_plan["scene"],
-                        rpe=workout_plan["rpe"],
-                        modules=workout_plan["modules"],
-                        ai_note=workout_plan.get("ai_note"),
+                        title=plan_data["title"],
+                        subtitle=plan_data.get("subtitle", ""),
+                        total_duration=plan_data["total_duration"],
+                        scene=plan_data["scene"],
+                        rpe=plan_data["rpe"],
+                        modules=plan_data["modules"],
+                        ai_note=plan_data.get("ai_note"),
                         is_applied=False
                     )
-                    workout_plan["id"] = str(plan_record.id)
+                    plan_data["id"] = str(plan_record.id)
+                    # 添加到计划列表
+                    workout_plans.append(plan_data)
                     yield {
                         "type": "plan",
-                        "plan": workout_plan,
-                        "plan_id": str(plan_record.id)
+                        "plan": plan_data,
+                        "plan_id": str(plan_record.id),
+                        "plan_index": len(workout_plans) - 1,
+                        "total_plans": len(workout_plans)
                     }
-                except Exception:
+                except Exception as e:
+                    logger.error(f"保存计划失败: {e}")
                     yield chunk
             elif chunk["type"] == "done":
                 # 更新已有消息或添加新消息
+                # 多个计划时，保存所有计划到 structured_data 中
+                structured_data = None
+                if len(workout_plans) == 1:
+                    structured_data = workout_plans[0]
+                elif len(workout_plans) > 1:
+                    structured_data = {
+                        "plans": workout_plans,
+                        "primary_plan": workout_plans[0]
+                    }
+
                 message = await self.context_service.add_message_and_update_summary(
                     session_id=session_id,
                     role="assistant",
                     content=full_content,
-                    structured_data=workout_plan,
-                    data_type="workout_plan" if workout_plan else "text"
+                    structured_data=structured_data,
+                    data_type="workout_plan" if workout_plans else "text"
                 )
                 yield {
                     "type": "done",
                     "session_id": session_id,
-                    "has_plan": workout_plan is not None,
+                    "has_plan": len(workout_plans) > 0,
+                    "has_multiple_plans": len(workout_plans) > 1,
+                    "plans_count": len(workout_plans),
                     "message_id": str(message.id)  # 返回后端生成的消息ID
                 }
             elif chunk["type"] == "error":

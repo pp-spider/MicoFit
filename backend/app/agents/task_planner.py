@@ -73,9 +73,12 @@ class TaskPlanner:
         # 5. 判断是否需要协作
         requires_collaboration = len(tasks) > 1
 
-        logger.info(f"生成执行计划: {len(tasks)} 个任务, "
-                   f"需要协作: {requires_collaboration}, "
-                   f"并行组: {parallel_groups}")
+        # 统计workout任务数量
+        workout_tasks = [t for t in tasks if t.get("type") == TaskType.WORKOUT]
+        logger.info(f"[TaskPlanner] 生成执行计划: {len(tasks)} 个任务, workout任务: {len(workout_tasks)}")
+        for t in tasks:
+            logger.info(f"[TaskPlanner] 任务: {t['id']}, type={t['type']}, agent={t['agent_name']}")
+        logger.info(f"[TaskPlanner] 需要协作: {requires_collaboration}, 并行组: {parallel_groups}")
 
         return ExecutionPlan(
             tasks=tasks,

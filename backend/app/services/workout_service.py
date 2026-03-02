@@ -4,7 +4,6 @@ from datetime import date, timedelta
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, update
-
 from app.models.workout_plan import WorkoutPlan, WorkoutRecord
 
 
@@ -25,12 +24,14 @@ class WorkoutService:
         rpe: int,
         modules: list,
         ai_note: str | None = None,
-        is_applied: bool = False
+        is_applied: bool = False,
+        force_create: bool = False
     ) -> WorkoutPlan:
         """
         创建或更新训练计划
 
         如果同一天已存在计划，则更新现有计划；否则创建新计划。
+        当 force_create=True 时，强制创建新计划（用于多计划场景）。
 
         Args:
             user_id: 用户ID
@@ -43,36 +44,38 @@ class WorkoutService:
             modules: 模块列表
             ai_note: AI备注
             is_applied: 是否已应用
+            force_create: 是否强制创建新计划（不更新现有计划）
 
         Returns:
             WorkoutPlan: 创建或更新的计划
         """
-        # 检查同一天是否已有计划
-        result = await self.db.execute(
-            select(WorkoutPlan).where(
-                and_(
-                    WorkoutPlan.user_id == user_id,
-                    WorkoutPlan.plan_date == plan_date
+        # 检查同一天是否已有计划（仅在非强制创建模式下）
+        if not force_create:
+            result = await self.db.execute(
+                select(WorkoutPlan).where(
+                    and_(
+                        WorkoutPlan.user_id == user_id,
+                        WorkoutPlan.plan_date == plan_date
+                    )
                 )
             )
-        )
-        existing_plan = result.scalar_one_or_none()
+            existing_plan = result.scalar_one_or_none()
 
-        if existing_plan:
-            # 更新现有计划
-            existing_plan.title = title
-            existing_plan.subtitle = subtitle
-            existing_plan.total_duration = total_duration
-            existing_plan.scene = scene
-            existing_plan.rpe = rpe
-            existing_plan.modules = modules
-            existing_plan.ai_note = ai_note
-            existing_plan.is_applied = is_applied
-            existing_plan.is_completed = False  # 重置完成状态
-            existing_plan.feedback_id = None  # 清除关联的反馈
-            await self.db.commit()
-            await self.db.refresh(existing_plan)
-            return existing_plan
+            if existing_plan:
+                # 更新现有计划
+                existing_plan.title = title
+                existing_plan.subtitle = subtitle
+                existing_plan.total_duration = total_duration
+                existing_plan.scene = scene
+                existing_plan.rpe = rpe
+                existing_plan.modules = modules
+                existing_plan.ai_note = ai_note
+                existing_plan.is_applied = is_applied
+                existing_plan.is_completed = False  # 重置完成状态
+                existing_plan.feedback_id = None  # 清除关联的反馈
+                await self.db.commit()
+                await self.db.refresh(existing_plan)
+                return existing_plan
 
         # 创建新计划
         plan = WorkoutPlan(

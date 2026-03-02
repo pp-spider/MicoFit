@@ -450,6 +450,7 @@ class TaskExecutor:
 
                     if chunk.get("type") == "plan":
                         plan = chunk.get("plan")
+                        logger.info(f"[TaskExecutor] Workout任务 {task_id} 生成计划: {plan.get('title') if plan else 'None'}")
 
                 # 收集结果
                 content_parts = [c.get("content", "") for c in chunks if c.get("type") == "chunk"]

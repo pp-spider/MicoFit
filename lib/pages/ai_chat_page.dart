@@ -152,6 +152,38 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     tableCellsPadding: const EdgeInsets.all(8),
   );
 
+  // 用于跟踪流式状态的变量
+  bool _wasStreaming = false;
+  // 用于确保 Provider 监听器只注册一次
+  bool _chatProviderListenerAdded = false;
+  // 用户是否正在手动滚动
+  bool _isUserScrolling = false;
+  // 恢复自动滚动的计时器
+  Timer? _resumeAutoScrollTimer;
+  // 用户停止滚动后多久恢复自动滚动（毫秒）
+  static const int _autoResumeDelayMs = 3000;
+
+  /// Provider 变更监听器 - 在流式输出期间自动滚动
+  void _onChatProviderChanged() {
+    final chatProvider = context.read<ChatProvider>();
+    final isStreaming = chatProvider.isStreaming;
+
+    // 当流式状态从 false 变为 true 时（开始流式输出）
+    if (isStreaming && !_wasStreaming) {
+      _wasStreaming = true;
+    }
+    // 当处于流式状态时，滚动到底部
+    else if (isStreaming && _wasStreaming) {
+      _scrollToBottomDuringStreaming();
+    }
+    // 当流式状态从 true 变为 false 时（流式输出结束）
+    else if (!isStreaming && _wasStreaming) {
+      _wasStreaming = false;
+      // 流式结束时确保滚动到底部
+      _scrollToBottom();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -180,7 +212,23 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 添加 Provider 监听器以在流式输出期间自动滚动（只注册一次）
+    if (!_chatProviderListenerAdded) {
+      final chatProvider = context.read<ChatProvider>();
+      chatProvider.addListener(_onChatProviderChanged);
+      _chatProviderListenerAdded = true;
+    }
+  }
+
+  @override
   void dispose() {
+    // 取消恢复自动滚动的计时器
+    _resumeAutoScrollTimer?.cancel();
+    // 移除 Provider 监听器
+    final chatProvider = context.read<ChatProvider>();
+    chatProvider.removeListener(_onChatProviderChanged);
     // 确保动画控制器先停止再释放
     _pulseController.stop();
     _slideController.stop();
@@ -204,6 +252,10 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     _focusNode.unfocus();
     _textController.clear();
 
+    // 重置用户滚动状态，确保发送新消息时自动滚动到底部
+    _isUserScrolling = false;
+    _resumeAutoScrollTimer?.cancel();
+
     // 通过 Provider 发送消息
     await chatProvider.sendMessage(text);
 
@@ -221,6 +273,58 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
         );
       }
     });
+  }
+
+  /// 流式输出期间滚动到底部（智能滚动）
+  /// 如果用户正在手动滚动，暂停自动滚动，延迟后恢复
+  void _scrollToBottomDuringStreaming() {
+    // 如果用户正在手动滚动，不执行自动滚动
+    if (_isUserScrolling) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients && !_isUserScrolling) {
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        final currentScroll = _scrollController.position.pixels;
+        // 只有当用户位于底部附近时才自动滚动（200像素的阈值，更宽松）
+        final distanceFromBottom = maxScroll - currentScroll;
+        if (distanceFromBottom < 200) {
+          _scrollController.animateTo(
+            maxScroll,
+            duration: const Duration(milliseconds: 100),
+            curve: Curves.easeOut,
+          );
+        }
+      }
+    });
+  }
+
+  /// 处理用户滚动开始
+  void _onUserScrollStart() {
+    if (!_isUserScrolling) {
+      _isUserScrolling = true;
+      // 取消之前的恢复计时器
+      _resumeAutoScrollTimer?.cancel();
+    }
+  }
+
+  /// 处理用户滚动结束
+  void _onUserScrollEnd() {
+    // 延迟一段时间后恢复自动滚动
+    _resumeAutoScrollTimer?.cancel();
+    _resumeAutoScrollTimer = Timer(
+      const Duration(milliseconds: _autoResumeDelayMs),
+      () {
+        if (mounted) {
+          _isUserScrolling = false;
+          // 恢复自动滚动到底部
+          if (context.read<ChatProvider>().isStreaming) {
+            _scrollToBottom();
+          }
+        }
+      },
+    );
   }
 
   /// 复制消息到剪贴板
@@ -698,11 +802,23 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
       messageWidgets.add(_buildStreamingAgentAccordion(chatProvider));
     }
 
-    return ListView.builder(
-      controller: _scrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      itemCount: messageWidgets.length,
-      itemBuilder: (context, index) => messageWidgets[index],
+    return NotificationListener<ScrollNotification>(
+      onNotification: (scrollNotification) {
+        if (scrollNotification is ScrollStartNotification) {
+          // 用户开始滚动
+          _onUserScrollStart();
+        } else if (scrollNotification is ScrollEndNotification) {
+          // 用户停止滚动
+          _onUserScrollEnd();
+        }
+        return false;
+      },
+      child: ListView.builder(
+        controller: _scrollController,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        itemCount: messageWidgets.length,
+        itemBuilder: (context, index) => messageWidgets[index],
+      ),
     );
   }
 
@@ -816,10 +932,11 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
 
     // 检查是否包含健身计划
     // 如果计划未响应，只在最后一条消息显示；如果已响应，始终显示（变灰状态）
+    // 支持多计划场景
     final isPlanMessage =
         !isUser &&
         message.dataType == ChatMessageDataType.workoutPlan &&
-        chatProvider.pendingWorkoutPlan != null;
+        chatProvider.pendingWorkoutPlans.isNotEmpty;
     final hasWorkoutPlan =
         isPlanMessage &&
         (chatProvider.isPlanResponded || index == messages.length - 1);
@@ -881,14 +998,20 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                           ),
                   ),
                 ),
-                // 健身计划预览
-                if (hasWorkoutPlan && chatProvider.pendingWorkoutPlan != null)
-                  _buildWorkoutPlanPreview(
-                    chatProvider.pendingWorkoutPlan!,
-                    chatProvider,
-                    chatProvider.isPlanResponded,
-                    message.id,
-                  ),
+                // 健身计划预览（支持多计划）
+                if (hasWorkoutPlan && chatProvider.pendingWorkoutPlans.isNotEmpty)
+                  chatProvider.pendingWorkoutPlans.length == 1
+                      ? _buildWorkoutPlanPreview(
+                          chatProvider.pendingWorkoutPlans.first,
+                          chatProvider,
+                          chatProvider.isPlanResponded,
+                          message.id,
+                        )
+                      : _buildMultipleWorkoutPlansPreview(
+                          chatProvider.pendingWorkoutPlans,
+                          chatProvider,
+                          message.id,
+                        ),
                 // 时间戳和复制按钮
                 Padding(
                   padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
@@ -1211,6 +1334,259 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
           ),
         ],
       ),
+    );
+  }
+
+  /// 多个健身计划预览卡片（多计划场景）
+  Widget _buildMultipleWorkoutPlansPreview(
+    List<WorkoutPlan> plans,
+    ChatProvider chatProvider,
+    String messageId,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 计划数量提示
+        Container(
+          margin: const EdgeInsets.only(top: 12, bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFF8B5CF6).withValues(alpha: 0.3),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.fitness_center,
+                size: 16,
+                color: const Color(0xFF8B5CF6),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '为您生成了 ${plans.length} 个训练计划',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF8B5CF6),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 计划列表
+        ...plans.asMap().entries.map((entry) {
+          final index = entry.key;
+          final plan = entry.value;
+          final isResponded = chatProvider.isPlanRespondedById(plan.id);
+          final isConfirmed = chatProvider.isPlanConfirmedById(plan.id);
+          // 使用组合key确保每个计划的展开状态独立
+          final planKey = '${messageId}_plan_${plan.id}';
+
+          return Container(
+            margin: const EdgeInsets.only(top: 8),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFF2DD4BF).withValues(alpha: 0.1),
+                  const Color(0xFF14B8A6).withValues(alpha: 0.05),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFF2DD4BF).withValues(alpha: 0.3),
+                width: 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 计划序号标识
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2DD4BF).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '计划 ${index + 1}/${plans.length}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF115E59),
+                      ),
+                    ),
+                  ),
+                ),
+                // 单个计划预览（复用原有组件）
+                _buildSingleWorkoutPlanCard(
+                  plan,
+                  chatProvider,
+                  isResponded,
+                  planKey,
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  /// 单个计划卡片（用于多计划列表中）
+  Widget _buildSingleWorkoutPlanCard(
+    WorkoutPlan plan,
+    ChatProvider chatProvider,
+    bool isResponded,
+    String planKey,
+  ) {
+    final isExpanded = _expandedPlanCards.contains(planKey);
+    final isConfirmed = chatProvider.isPlanConfirmedById(plan.id);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 可点击的标题栏
+        InkWell(
+          onTap: () {
+            setState(() {
+              if (isExpanded) {
+                _expandedPlanCards.remove(planKey);
+              } else {
+                _expandedPlanCards.add(planKey);
+              }
+            });
+          },
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildPlanHeader(plan),
+                const SizedBox(height: 12),
+                _buildPlanStats(plan),
+                const SizedBox(height: 8),
+                // 展开/收起指示器
+                Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isExpanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        color: const Color(0xFF2DD4BF),
+                        size: 20,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isExpanded ? '点击收起' : '点击展开详情',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: const Color(0xFF2DD4BF),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // 可展开的内容
+        AnimatedCrossFade(
+          firstChild: const SizedBox.shrink(),
+          secondChild: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ...plan.modules.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final module = entry.value;
+                  return _buildModuleDetail(module, index + 1);
+                }),
+                const SizedBox(height: 16),
+                if (!isResponded)
+                  _buildMultiPlanActionButtons(plan, chatProvider)
+                else
+                  _buildResponseStatus(isConfirmed),
+              ],
+            ),
+          ),
+          crossFadeState:
+              isExpanded
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 300),
+        ),
+      ],
+    );
+  }
+
+  /// 多计划场景的操作按钮（带计划ID）
+  Widget _buildMultiPlanActionButtons(
+    WorkoutPlan plan,
+    ChatProvider chatProvider,
+  ) {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: () => chatProvider.rejectWorkoutPlanById(plan.id),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.grey[600],
+              side: BorderSide(color: Colors.grey[300]!),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text('取消'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ElevatedButton(
+            onPressed: chatProvider.isApplyingPlan
+                ? null
+                : () => chatProvider.applyWorkoutPlan(plan),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2DD4BF),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: chatProvider.isApplyingPlan
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : const Text(
+                    '确认计划',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+          ),
+        ),
+      ],
     );
   }
 

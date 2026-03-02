@@ -80,6 +80,7 @@ class AggregatedResult(TypedDict):
     """聚合后的结果"""
     type: str
     content: str
-    plan: dict | None
+    plan: dict | None  # 单个计划（向后兼容）
+    plans: list[dict] | None  # 多个计划（多计划场景）
     response_format: str
     tasks_output: dict

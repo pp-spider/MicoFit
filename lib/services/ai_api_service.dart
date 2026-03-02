@@ -21,10 +21,14 @@ class AIStreamChunk {
   final String? agent;
   final String? agentStatus;
   final String? taskType;
+  final String? taskId; // 任务唯一标识，用于区分同名 agent 的不同实例
   // PlannerAgent 规划阶段字段
   final Map<String, dynamic>? analysis;
   final List<dynamic>? executionOrder;
   final List<dynamic>? parallelGroups;
+  // 多计划支持字段
+  final int? planIndex;     // 当前计划索引
+  final int? totalPlans;    // 总计划数
 
   AIStreamChunk({
     required this.type,
@@ -38,9 +42,12 @@ class AIStreamChunk {
     this.agent,
     this.agentStatus,
     this.taskType,
+    this.taskId,  // 任务唯一标识，用于区分同名 agent 的不同实例
     this.analysis,
     this.executionOrder,
     this.parallelGroups,
+    this.planIndex,
+    this.totalPlans,
   });
 
   factory AIStreamChunk.fromJson(Map<String, dynamic> json) {
@@ -58,9 +65,12 @@ class AIStreamChunk {
       agent: json['agent'] as String?,
       agentStatus: json['status'] as String?,
       taskType: json['task_type'] as String?,
+      taskId: json['task_id'] as String?,  // 任务唯一标识
       analysis: json['analysis'] as Map<String, dynamic>?,
       executionOrder: json['execution_order'] as List<dynamic>?,
       parallelGroups: json['parallel_groups'] as List<dynamic>?,
+      planIndex: json['plan_index'] as int?,
+      totalPlans: json['total_plans'] as int?,
     );
   }
 }

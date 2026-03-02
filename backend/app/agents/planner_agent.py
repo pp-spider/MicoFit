@@ -216,6 +216,7 @@ class PlannerAgent:
                         elif result_type == "plan":
                             final_plan = result.get("plan")
                             all_chunks.append(result)
+                            logger.info(f"[PlannerAgent] 收到plan事件: {final_plan.get('title') if final_plan else 'None'}, task_id={result.get('task_id')}")
 
                         # 跳过子Agent内部的done事件
                         if result_type == "done":
@@ -306,12 +307,20 @@ class PlannerAgent:
             print(f"   包含计划: {aggregated.get('plan') is not None}")
             print("─"*50 + "\n")
 
+            # 收集所有计划（支持多计划场景）
+            plans = aggregated.get("plans", [])
+            if not plans and aggregated.get("plan"):
+                plans = [aggregated.get("plan")]
+
             yield {
                 "type": "done",
-                "has_plan": aggregated.get("plan") is not None,
+                "has_plan": len(plans) > 0 or aggregated.get("plan") is not None,
+                "has_multiple_plans": len(plans) > 1,
+                "plans_count": len(plans),
                 "result_type": aggregated.get("type"),
                 "content": aggregated.get("content"),
-                "plan": aggregated.get("plan")
+                "plan": aggregated.get("plan"),  # 向后兼容：第一个计划
+                "plans": plans  # 所有计划列表
             }
 
         except Exception as e:

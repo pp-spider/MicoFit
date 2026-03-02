@@ -124,4 +124,112 @@ class ChatLocalService {
     await UserDataHelper.remove(_respondedPlanKey);
     await UserDataHelper.remove(_isPlanConfirmedKey);
   }
+
+  // ========== 多计划支持（新增）==========
+
+  static const String _pendingPlansKey = 'pending_workout_plans';
+  static const String _respondedPlansKey = 'responded_workout_plans';
+  static const String _planStatusesKey = 'plan_statuses';
+
+  /// 保存待确认的健身计划列表
+  Future<void> savePendingPlans(List<WorkoutPlan> plans) async {
+    final plansJson = jsonEncode(plans.map((p) => p.toJson()).toList());
+    await UserDataHelper.setString(_pendingPlansKey, plansJson);
+  }
+
+  /// 加载待确认的健身计划列表
+  Future<List<WorkoutPlan>> loadPendingPlans() async {
+    final plansJson = await UserDataHelper.getString(_pendingPlansKey);
+    if (plansJson == null) return [];
+
+    try {
+      final List<dynamic> jsonList = jsonDecode(plansJson);
+      return jsonList
+          .map((json) => WorkoutPlan.fromJson(json as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('加载待确认计划列表失败: $e');
+      return [];
+    }
+  }
+
+  /// 清除待确认的健身计划列表
+  Future<void> clearPendingPlans() async {
+    await UserDataHelper.remove(_pendingPlansKey);
+  }
+
+  /// 保存计划响应状态（用于多计划场景）
+  /// key: plan.id, value: {'responded': bool, 'confirmed': bool}
+  Future<void> savePlanStatuses(Map<String, Map<String, dynamic>> statuses) async {
+    await UserDataHelper.setString(_planStatusesKey, jsonEncode(statuses));
+  }
+
+  /// 加载计划响应状态
+  Future<Map<String, Map<String, dynamic>>> loadPlanStatuses() async {
+    final json = await UserDataHelper.getString(_planStatusesKey);
+    if (json == null) return {};
+
+    try {
+      final Map<String, dynamic> decoded = jsonDecode(json);
+      return decoded.map((key, value) =>
+        MapEntry(key, (value as Map<String, dynamic>)));
+    } catch (e) {
+      debugPrint('加载计划状态失败: $e');
+      return {};
+    }
+  }
+
+  /// 清除计划响应状态
+  Future<void> clearPlanStatuses() async {
+    await UserDataHelper.remove(_planStatusesKey);
+  }
+
+  /// 保存已响应的计划列表
+  Future<void> saveRespondedPlans(
+    List<WorkoutPlan> plans,
+    Map<String, bool> confirmedMap,
+  ) async {
+    final plansJson = jsonEncode(plans.map((p) => p.toJson()).toList());
+    await UserDataHelper.setString(_respondedPlansKey, plansJson);
+    await UserDataHelper.setString(
+      '${_respondedPlansKey}_status',
+      jsonEncode(confirmedMap),
+    );
+  }
+
+  /// 加载已响应的计划列表
+  Future<List<WorkoutPlan>> loadRespondedPlans() async {
+    final plansJson = await UserDataHelper.getString(_respondedPlansKey);
+    if (plansJson == null) return [];
+
+    try {
+      final List<dynamic> jsonList = jsonDecode(plansJson);
+      return jsonList
+          .map((json) => WorkoutPlan.fromJson(json as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('加载已响应计划列表失败: $e');
+      return [];
+    }
+  }
+
+  /// 加载已响应计划的确认状态映射
+  Future<Map<String, bool>> loadRespondedPlanStatuses() async {
+    final json = await UserDataHelper.getString('${_respondedPlansKey}_status');
+    if (json == null) return {};
+
+    try {
+      final Map<String, dynamic> decoded = jsonDecode(json);
+      return decoded.map((key, value) => MapEntry(key, value as bool));
+    } catch (e) {
+      debugPrint('加载已响应计划状态失败: $e');
+      return {};
+    }
+  }
+
+  /// 清除已响应的计划列表
+  Future<void> clearRespondedPlans() async {
+    await UserDataHelper.remove(_respondedPlansKey);
+    await UserDataHelper.remove('${_respondedPlansKey}_status');
+  }
 }

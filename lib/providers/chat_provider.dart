@@ -26,12 +26,14 @@ class AgentExecutionStatus {
   final String taskType;
   final bool isActive; // true = 执行中, false = 已完成
   final List<AgentContentItem> contentItems;
+  final String? taskId; // 任务唯一标识，用于区分同名 agent 的不同实例
 
   AgentExecutionStatus({
     required this.agent,
     required this.taskType,
     required this.isActive,
     this.contentItems = const [],
+    this.taskId,
   });
 
   /// 创建已完成状态
@@ -41,6 +43,7 @@ class AgentExecutionStatus {
       taskType: taskType,
       isActive: false,
       contentItems: contentItems,
+      taskId: taskId,
     );
   }
 
@@ -51,6 +54,7 @@ class AgentExecutionStatus {
       taskType: taskType,
       isActive: isActive,
       contentItems: [...contentItems, item],
+      taskId: taskId,
     );
   }
 
@@ -64,6 +68,7 @@ class AgentExecutionStatus {
       taskType: taskType,
       isActive: isActive,
       contentItems: newItems,
+      taskId: taskId,
     );
   }
 
@@ -84,6 +89,7 @@ class AgentExecutionStatus {
         taskType: taskType,
         isActive: isActive,
         contentItems: newItems,
+        taskId: taskId,
       );
     } else {
       // 添加新的 text 内容项
@@ -94,7 +100,7 @@ class AgentExecutionStatus {
   /// 转换为AgentOutput（用于UI展示）
   AgentOutput toAgentOutput({bool isExpanded = false, String? messageContent}) {
     return AgentOutput(
-      id: agent,
+      id: taskId ?? agent,  // 使用 taskId 作为唯一标识，如果没有则使用 agent 名称
       name: AgentOutput.getDisplayName(agent),
       icon: AgentOutput.getIcon(agent),
       status: isActive ? AgentStatus.running : AgentStatus.completed,
@@ -137,8 +143,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 当前流式消息的ID
   String? _streamingMessageId;
 
-  /// 待确认的健身计划
-  WorkoutPlan? _pendingWorkoutPlan;
+  /// 待确认的健身计划列表（支持多计划）
+  final List<WorkoutPlan> _pendingWorkoutPlans = [];
 
   /// 流式生成中的内容缓冲
   StringBuffer? _streamingBuffer;
@@ -146,11 +152,17 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 是否正在应用计划
   bool _isApplyingPlan = false;
 
-  /// 用户是否已响应计划（确认或取消）
+  /// 用户是否已响应计划（确认或取消）- 单个计划场景（向后兼容）
   bool _isPlanResponded = false;
 
-  /// 计划响应结果：null=未响应, true=已确认, false=已取消
+  /// 计划响应结果：null=未响应, true=已确认, false=已取消 - 单个计划场景（向后兼容）
   bool? _isPlanConfirmed;
+
+  /// 多计划场景：每个计划的响应状态映射（key: plan.id）
+  final Map<String, bool> _pendingPlanResponded = {};
+
+  /// 多计划场景：每个计划的确认状态映射（key: plan.id, value: true=已确认, false=已取消）
+  final Map<String, bool> _pendingPlanConfirmed = {};
 
   /// 当前会话ID
   String? _currentSessionId;
@@ -236,11 +248,14 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       // planner_agent 只有在活跃时才显示
       return false;
     }).map((agent) {
+      // 使用 taskId 作为状态键，如果没有则使用 agent 名称
+      final stateKey = agent.taskId ?? agent.agent;
+      final bufferKey = agent.taskId ?? agent.agent;
       return agent.toAgentOutput(
         isExpanded:
-            _agentExpandedStates[agent.agent] ??
+            _agentExpandedStates[stateKey] ??
             agent.isActive, // 正在运行的 Agent 默认展开
-        messageContent: _agentContentBuffers[agent.agent]?.toString(),
+        messageContent: _agentContentBuffers[bufferKey]?.toString(),
       );
     }).toList();
 
@@ -279,11 +294,35 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   ChatStreamStatus get streamStatus => _streamStatus;
   bool get isStreaming => _streamStatus == ChatStreamStatus.streaming;
   bool get isIdle => _streamStatus == ChatStreamStatus.idle;
-  WorkoutPlan? get pendingWorkoutPlan => _pendingWorkoutPlan;
+
+  /// 待确认的训练计划列表（支持多计划）
+  List<WorkoutPlan> get pendingWorkoutPlans => List.unmodifiable(_pendingWorkoutPlans);
+
+  /// 向后兼容：获取第一个待确认计划（单计划场景）
+  WorkoutPlan? get pendingWorkoutPlan =>
+      _pendingWorkoutPlans.isNotEmpty ? _pendingWorkoutPlans.first : null;
+
   bool get isApplyingPlan => _isApplyingPlan;
-  bool get hasPendingPlan => _pendingWorkoutPlan != null;
+
+  /// 是否有待确认的计划（支持多计划）
+  bool get hasPendingPlan => _pendingWorkoutPlans.isNotEmpty;
+
+  /// 向后兼容：单个计划的响应状态
   bool get isPlanResponded => _isPlanResponded;
+
+  /// 向后兼容：单个计划的确认状态
   bool? get isPlanConfirmed => _isPlanConfirmed;
+
+  /// 获取指定计划的响应状态（多计划场景）
+  bool isPlanRespondedById(String planId) =>
+      _pendingPlanResponded[planId] ?? false;
+
+  /// 获取指定计划的确认状态（多计划场景）
+  bool? isPlanConfirmedById(String planId) =>
+      _pendingPlanConfirmed.containsKey(planId)
+          ? _pendingPlanConfirmed[planId]
+          : null;
+
   String? get streamingMessageId => _streamingMessageId;
   String? get currentSessionId => _currentSessionId;
 
@@ -308,7 +347,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // 清除当前内存中的消息，重置为"未选择会话"状态
     _messages.clear();
     _currentSessionId = null;
-    _pendingWorkoutPlan = null;
+    _pendingWorkoutPlans.clear();
+    _pendingPlanResponded.clear();
+    _pendingPlanConfirmed.clear();
     _isPlanResponded = false;
     _isPlanConfirmed = null;
 
@@ -330,23 +371,58 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('[ChatProvider] 同步聊天历史失败: $e');
     }
 
-    // 恢复待确认计划或已响应的计划
-    _pendingWorkoutPlan = await _localService.loadPendingPlan();
-    if (_pendingWorkoutPlan != null) {
+    // 恢复待确认计划列表或已响应的计划列表（多计划支持）
+    final pendingPlans = await _localService.loadPendingPlans();
+    if (pendingPlans.isNotEmpty) {
       // 有待确认计划，状态为未响应
+      _pendingWorkoutPlans.addAll(pendingPlans);
       _isPlanResponded = false;
       _isPlanConfirmed = null;
     } else {
       // 没有待确认计划，尝试加载已响应的计划
-      _pendingWorkoutPlan = await _localService.loadRespondedPlan();
-      if (_pendingWorkoutPlan != null) {
-        // 有已响应的计划，恢复响应状态
+      final respondedPlans = await _localService.loadRespondedPlans();
+      if (respondedPlans.isNotEmpty) {
+        _pendingWorkoutPlans.addAll(respondedPlans);
+        // 加载各计划的响应状态
+        final planStatuses = await _localService.loadRespondedPlanStatuses();
+        for (final entry in planStatuses.entries) {
+          _pendingPlanResponded[entry.key] = true;
+          _pendingPlanConfirmed[entry.key] = entry.value;
+        }
+        // 向后兼容：整体状态
         _isPlanResponded = true;
-        _isPlanConfirmed = await _localService.loadIsPlanConfirmed();
+        _isPlanConfirmed = planStatuses.values.isNotEmpty
+            ? planStatuses.values.first
+            : null;
       } else {
-        // 没有任何计划
-        _isPlanResponded = false;
-        _isPlanConfirmed = null;
+        // 向后兼容：尝试加载旧的单个计划格式
+        final oldPendingPlan = await _localService.loadPendingPlan();
+        if (oldPendingPlan != null) {
+          _pendingWorkoutPlans.add(oldPendingPlan);
+          _isPlanResponded = false;
+          _isPlanConfirmed = null;
+          // 迁移到新格式
+          await _localService.savePendingPlans(_pendingWorkoutPlans);
+          await _localService.clearPendingPlan();
+        } else {
+          final oldRespondedPlan = await _localService.loadRespondedPlan();
+          if (oldRespondedPlan != null) {
+            _pendingWorkoutPlans.add(oldRespondedPlan);
+            final oldConfirmed = await _localService.loadIsPlanConfirmed();
+            _pendingPlanResponded[oldRespondedPlan.id] = true;
+            if (oldConfirmed != null) {
+              _pendingPlanConfirmed[oldRespondedPlan.id] = oldConfirmed;
+            }
+            _isPlanResponded = true;
+            _isPlanConfirmed = oldConfirmed;
+            // 迁移到新格式
+            await _localService.saveRespondedPlans(
+              _pendingWorkoutPlans,
+              {oldRespondedPlan.id: oldConfirmed ?? false},
+            );
+            await _localService.clearRespondedPlan();
+          }
+        }
       }
     }
 
@@ -360,7 +436,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   void clearMemoryData() {
     _messages.clear();
     _currentSessionId = null;
-    _pendingWorkoutPlan = null;
+    _pendingWorkoutPlans.clear();
+    _pendingPlanResponded.clear();
+    _pendingPlanConfirmed.clear();
     _isPlanResponded = false;
     _isPlanConfirmed = null;
     _streamingMessageId = null;
@@ -369,6 +447,51 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _throttleTimer?.cancel();
     _throttleTimer = null;
     notifyListeners();
+  }
+
+  /// 从历史消息中解析待确认的训练计划
+  void _parseWorkoutPlansFromMessages() {
+    for (final message in _messages) {
+      if (message.type == ChatMessageType.assistant &&
+          message.dataType == ChatMessageDataType.workoutPlan &&
+          message.structuredData != null) {
+        final data = message.structuredData!;
+
+        // 检查是否是多计划格式 {"plans": [...], "primary_plan": ...}
+        if (data.containsKey('plans') && data['plans'] is List) {
+          final plansList = data['plans'] as List<dynamic>;
+          for (final planJson in plansList) {
+            try {
+              final plan = WorkoutPlan.fromJson(planJson as Map<String, dynamic>);
+              // 只添加未完成的计划
+              if (!plan.isCompleted) {
+                _pendingWorkoutPlans.add(plan);
+              }
+            } catch (e) {
+              debugPrint('[ChatProvider] 解析计划失败: $e');
+            }
+          }
+        }
+        // 单计划格式，直接解析整个 structuredData
+        else if (data.containsKey('modules')) {
+          try {
+            final plan = WorkoutPlan.fromJson(data);
+            if (!plan.isCompleted) {
+              _pendingWorkoutPlans.add(plan);
+            }
+          } catch (e) {
+            debugPrint('[ChatProvider] 解析单计划失败: $e');
+          }
+        }
+
+        // 如果解析到了计划，设置为未响应状态
+        if (_pendingWorkoutPlans.isNotEmpty) {
+          _isPlanResponded = false;
+          _isPlanConfirmed = null;
+          debugPrint('[ChatProvider] 从历史消息恢复了 ${_pendingWorkoutPlans.length} 个计划');
+        }
+      }
+    }
   }
 
   /// 添加欢迎消息
@@ -478,12 +601,15 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             final agent = chunk.agent;
             final status = chunk.agentStatus;
             final taskType = chunk.taskType;
+            final taskId = chunk.taskId; // 任务唯一标识
 
-            debugPrint('[ChatProvider] Agent状态更新: agent=$agent, status=$status, taskType=$taskType');
+            debugPrint('[ChatProvider] Agent状态更新: agent=$agent, taskId=$taskId, status=$status, taskType=$taskType');
 
             if (agent != null && status != null && taskType != null) {
+              // 使用 taskId 作为唯一标识，如果没有则回退到 agent 名称（兼容旧逻辑）
+              final agentKey = taskId ?? agent;
               final existingIndex = _activeAgents.indexWhere(
-                (a) => a.agent == agent,
+                (a) => a.taskId == agentKey || (taskId == null && a.agent == agent),
               );
 
               if (status == 'started') {
@@ -495,6 +621,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                       taskType: taskType,
                       isActive: true,
                       contentItems: [AgentContentItem.typing('正在初始化...')],
+                      taskId: agentKey,
                     ),
                   );
                 } else {
@@ -507,6 +634,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                     contentItems: existing.contentItems.isEmpty
                         ? [AgentContentItem.typing('正在处理...')]
                         : existing.contentItems,
+                    taskId: existing.taskId ?? agentKey,
                   );
                 }
 
@@ -533,8 +661,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                   _activeAgents[existingIndex] = completed.addContentItem(
                     AgentContentItem.success('任务执行完成'),
                   );
-                  // 自动收起该Agent
-                  _agentExpandedStates[agent] = false;
+                  // 自动收起该Agent（使用 taskId 作为状态键）
+                  final stateKey = _activeAgents[existingIndex].taskId ?? agent;
+                  _agentExpandedStates[stateKey] = false;
                 } else {
                   // 如果不存在，直接添加为已完成状态（收起）
                   _activeAgents.add(
@@ -543,10 +672,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                       taskType: taskType,
                       isActive: false,
                       contentItems: [AgentContentItem.success('任务执行完成')],
+                      taskId: agentKey,
                     ),
                   );
                   // 自动收起该Agent
-                  _agentExpandedStates[agent] = false;
+                  _agentExpandedStates[agentKey] = false;
                 }
 
                 // 检查是否所有子Agent都已完成，如果是，添加总结Agent
@@ -657,6 +787,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             // 文本流块 - 根据是否为多任务场景决定是否累积到消息buffer
             if (chunk.content != null) {
               final agentId = chunk.agent;
+              final taskId = chunk.taskId; // 任务唯一标识
 
               // 判断是否应该将内容写入 streamingBuffer（消息正文）
               // 1. 单任务场景（没有 summary_agent）：所有内容都写入
@@ -668,8 +799,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
               }
 
               // 将内容添加到对应Agent的contentItems中（用于AgentAccordion显示）
+              // 优先使用 taskId 查找，如果没有则使用 agent 名称（兼容旧逻辑）
               if (agentId != null && agentId.isNotEmpty) {
-                final agentIndex = _activeAgents.indexWhere((a) => a.agent == agentId);
+                final agentIndex = _activeAgents.indexWhere(
+                  (a) => (taskId != null && a.taskId == taskId) || (taskId == null && a.agent == agentId),
+                );
                 if (agentIndex != -1) {
                   _activeAgents[agentIndex] = _activeAgents[agentIndex].appendTextContent(chunk.content!);
                 }
@@ -696,16 +830,36 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             break;
 
           case AIStreamType.plan:
-            // 收到训练计划
+            // 收到训练计划（支持多计划）
             final plan = chunk.plan;
+            debugPrint('[ChatProvider] ====== 收到训练计划事件 ======');
+            debugPrint('[ChatProvider] planIndex: ${chunk.planIndex}, totalPlans: ${chunk.totalPlans}');
+            debugPrint('[ChatProvider] plan.id: ${plan?.id}, plan.title: ${plan?.title}');
             if (plan != null) {
               receivedPlan = plan;
-              _pendingWorkoutPlan = plan;
-              // 重置计划响应状态（新计划应该是未响应状态）
+              // 添加到计划列表（避免重复）
+              final existingIndex = _pendingWorkoutPlans.indexWhere(
+                (p) => p.id == plan.id,
+              );
+              if (existingIndex >= 0) {
+                // 更新已存在的计划
+                debugPrint('[ChatProvider] 更新已存在的计划: ${plan.id}');
+                _pendingWorkoutPlans[existingIndex] = plan;
+              } else {
+                // 添加新计划
+                debugPrint('[ChatProvider] 添加新计划: ${plan.id}, 当前列表长度: ${_pendingWorkoutPlans.length}');
+                _pendingWorkoutPlans.add(plan);
+              }
+              debugPrint('[ChatProvider] 当前待确认计划总数: ${_pendingWorkoutPlans.length}');
+              debugPrint('[ChatProvider] 计划列表IDs: ${_pendingWorkoutPlans.map((p) => p.id).toList()}');
+              // 初始化该计划的响应状态
+              _pendingPlanResponded[plan.id] = false;
+              _pendingPlanConfirmed.remove(plan.id);
+              // 向后兼容：单个计划状态
               _isPlanResponded = false;
               _isPlanConfirmed = null;
-              // 保存计划到本地（不等待）
-              _localService.savePendingPlan(plan);
+              // 保存计划列表到本地（不等待）
+              _localService.savePendingPlans(_pendingWorkoutPlans);
               // 通知UI更新显示计划预览
               notifyListeners();
             }
@@ -737,7 +891,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 节流更新 UI
   void _throttleUpdate() {
     _throttleTimer?.cancel();
-    _throttleTimer = Timer(const Duration(milliseconds: 16), () {
+    _throttleTimer = Timer(const Duration(milliseconds: 8), () {
       // 只有在流式状态且消息ID有效时才更新
       if (_streamStatus != ChatStreamStatus.streaming ||
           _streamingMessageId == null) {
@@ -779,10 +933,15 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       // 构建 AgentOutput 列表（排除 summary_agent，因为它的内容就是最终回复）
       final agentOutputs = _activeAgents
           .where((agent) => agent.agent != 'summary_agent')
-          .map((agent) => agent.toAgentOutput(
-                isExpanded: _agentExpandedStates[agent.agent] ?? false,
-                messageContent: _agentContentBuffers[agent.agent]?.toString(),
-              ))
+          .map((agent) {
+                // 使用 taskId 作为状态键，如果没有则使用 agent 名称
+                final stateKey = agent.taskId ?? agent.agent;
+                final bufferKey = agent.taskId ?? agent.agent;
+                return agent.toAgentOutput(
+                  isExpanded: _agentExpandedStates[stateKey] ?? false,
+                  messageContent: _agentContentBuffers[bufferKey]?.toString(),
+                );
+              })
           .toList();
 
       // 更新消息 - 包含 Agent 输出
@@ -1032,12 +1191,30 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       final dateKey = 'workout_cache_${today.year}-${today.month}-${today.day}';
       await UserDataHelper.setString(dateKey, jsonEncode(plan.toJson()));
 
-      // 标记计划已响应（保留计划在UI上显示）
-      _isPlanResponded = true;
-      _isPlanConfirmed = true;
-      await _localService.clearPendingPlan();
-      // 保存已响应的计划到本地，以便重启后恢复
-      await _localService.saveRespondedPlan(plan, true);
+      // 标记该计划已确认（多计划场景）
+      _pendingPlanResponded[plan.id] = true;
+      _pendingPlanConfirmed[plan.id] = true;
+
+      // 检查是否所有计划都已响应
+      final allResponded = _pendingWorkoutPlans.every(
+        (p) => _pendingPlanResponded[p.id] == true,
+      );
+      if (allResponded) {
+        _isPlanResponded = true;
+        _isPlanConfirmed = true;
+        await _localService.clearPendingPlans();
+        // 保存已响应的计划列表
+        final statusMap = <String, bool>{};
+        for (final p in _pendingWorkoutPlans) {
+          statusMap[p.id] = _pendingPlanConfirmed[p.id] ?? false;
+        }
+        await _localService.saveRespondedPlans(_pendingWorkoutPlans, statusMap);
+      } else {
+        // 部分计划已响应，更新存储
+        await _localService.savePendingPlans(
+          _pendingWorkoutPlans.where((p) => _pendingPlanResponded[p.id] != true).toList(),
+        );
+      }
       _isApplyingPlan = false;
 
       notifyListeners();
@@ -1054,16 +1231,58 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// 拒绝健身计划
+  /// 拒绝指定ID的健身计划（多计划场景）
+  Future<void> rejectWorkoutPlanById(String planId) async {
+    // 标记该计划已拒绝
+    _pendingPlanResponded[planId] = true;
+    _pendingPlanConfirmed[planId] = false;
+
+    // 检查是否所有计划都已响应
+    final allResponded = _pendingWorkoutPlans.every(
+      (p) => _pendingPlanResponded[p.id] == true,
+    );
+    if (allResponded) {
+      _isPlanResponded = true;
+      _isPlanConfirmed = false;
+      await _localService.clearPendingPlans();
+      // 保存已响应的计划列表
+      final respondedPlans = _pendingWorkoutPlans.where(
+        (p) => _pendingPlanResponded[p.id] == true,
+      ).toList();
+      final statusMap = <String, bool>{};
+      for (final p in respondedPlans) {
+        statusMap[p.id] = _pendingPlanConfirmed[p.id] ?? false;
+      }
+      await _localService.saveRespondedPlans(respondedPlans, statusMap);
+    } else {
+      // 部分计划已响应，更新存储
+      await _localService.savePendingPlans(
+        _pendingWorkoutPlans.where((p) => _pendingPlanResponded[p.id] != true).toList(),
+      );
+    }
+
+    notifyListeners();
+  }
+
+  /// 拒绝健身计划（向后兼容：拒绝所有未响应的计划）
   Future<void> rejectWorkoutPlan() async {
-    // 标记计划已响应（保留计划在UI上显示）
+    // 标记所有未响应的计划为已拒绝
+    for (final plan in _pendingWorkoutPlans) {
+      if (_pendingPlanResponded[plan.id] != true) {
+        _pendingPlanResponded[plan.id] = true;
+        _pendingPlanConfirmed[plan.id] = false;
+      }
+    }
     _isPlanResponded = true;
     _isPlanConfirmed = false;
-    await _localService.clearPendingPlan();
-    // 保存已响应的计划到本地，以便重启后恢复
-    if (_pendingWorkoutPlan != null) {
-      await _localService.saveRespondedPlan(_pendingWorkoutPlan!, false);
+
+    await _localService.clearPendingPlans();
+    // 保存已响应的计划列表
+    final statusMap = <String, bool>{};
+    for (final plan in _pendingWorkoutPlans) {
+      statusMap[plan.id] = _pendingPlanConfirmed[plan.id] ?? false;
     }
+    await _localService.saveRespondedPlans(_pendingWorkoutPlans, statusMap);
 
     notifyListeners();
   }
@@ -1081,13 +1300,19 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     _messages.clear();
-    _pendingWorkoutPlan = null;
+    _pendingWorkoutPlans.clear();
+    _pendingPlanResponded.clear();
+    _pendingPlanConfirmed.clear();
     _isPlanResponded = false;
     _isPlanConfirmed = null;
     _currentSessionId = null;
     _addWelcomeMessage();
 
-    // 清除本地存储的计划
+    // 清除本地存储的计划（新旧格式都清除）
+    await _localService.clearPendingPlans();
+    await _localService.clearRespondedPlans();
+    await _localService.clearPlanStatuses();
+    // 向后兼容：清除旧格式
     await _localService.clearPendingPlan();
     await _localService.clearRespondedPlan();
 
@@ -1151,12 +1376,14 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _sessions.insert(0, session);
       _currentSessionId = session.id;
       _messages.clear();
-      _pendingWorkoutPlan = null;
+      _pendingWorkoutPlans.clear();
+      _pendingPlanResponded.clear();
+      _pendingPlanConfirmed.clear();
       _isPlanResponded = false;
       _isPlanConfirmed = null;
 
       // 清除已响应的计划（新会话不应该有之前的计划）
-      await _localService.clearRespondedPlan();
+      await _localService.clearRespondedPlans();
 
       // 注意：不添加欢迎消息，显示空状态
       notifyListeners();
@@ -1172,24 +1399,29 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     _currentSessionId = sessionId;
     _messages.clear();
+    _pendingWorkoutPlans.clear();
+    _pendingPlanResponded.clear();
+    _pendingPlanConfirmed.clear();
 
-    // 恢复待确认计划或已响应的计划
-    _pendingWorkoutPlan = await _localService.loadPendingPlan();
-    if (_pendingWorkoutPlan != null) {
-      // 有待确认计划，状态为未响应
+    // 恢复待确认计划列表或已响应的计划列表（多计划支持）
+    final pendingPlans = await _localService.loadPendingPlans();
+    if (pendingPlans.isNotEmpty) {
+      _pendingWorkoutPlans.addAll(pendingPlans);
       _isPlanResponded = false;
       _isPlanConfirmed = null;
     } else {
-      // 没有待确认计划，尝试加载已响应的计划
-      _pendingWorkoutPlan = await _localService.loadRespondedPlan();
-      if (_pendingWorkoutPlan != null) {
-        // 有已响应的计划，恢复响应状态
+      final respondedPlans = await _localService.loadRespondedPlans();
+      if (respondedPlans.isNotEmpty) {
+        _pendingWorkoutPlans.addAll(respondedPlans);
+        final planStatuses = await _localService.loadRespondedPlanStatuses();
+        for (final entry in planStatuses.entries) {
+          _pendingPlanResponded[entry.key] = true;
+          _pendingPlanConfirmed[entry.key] = entry.value;
+        }
         _isPlanResponded = true;
-        _isPlanConfirmed = await _localService.loadIsPlanConfirmed();
-      } else {
-        // 没有任何计划
-        _isPlanResponded = false;
-        _isPlanConfirmed = null;
+        _isPlanConfirmed = planStatuses.values.isNotEmpty
+            ? planStatuses.values.first
+            : null;
       }
     }
 
@@ -1205,6 +1437,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       // 从后端加载会话消息
       final messages = await _sessionApiService.getMessages(sessionId);
       _messages.addAll(messages);
+
+      // 从历史消息中解析待确认的训练计划
+      _parseWorkoutPlansFromMessages();
 
       // 如果没有消息，显示空状态（而不是欢迎消息）
       if (_messages.isEmpty) {
