@@ -59,13 +59,18 @@ class TaskPlanner:
         # 1. 为每个子任务创建 Task 对象
         tasks = self._create_tasks(sub_tasks)
 
-        # 2. 拓扑排序确定执行顺序
+        # 2. 如果任务数量大于1，添加总结任务作为最后一个任务
+        if len(tasks) > 1:
+            summary_task = self._create_summary_task(tasks)
+            tasks.append(summary_task)
+
+        # 3. 拓扑排序确定执行顺序
         execution_order = self._topological_sort(tasks)
 
-        # 3. 识别可并行执行的任务
+        # 4. 识别可并行执行的任务
         parallel_groups = self._find_parallel_groups(tasks, execution_order)
 
-        # 4. 判断是否需要协作
+        # 5. 判断是否需要协作
         requires_collaboration = len(tasks) > 1
 
         logger.info(f"生成执行计划: {len(tasks)} 个任务, "
@@ -113,6 +118,40 @@ class TaskPlanner:
             task_id_counter += 1
 
         return tasks
+
+    def _create_summary_task(self, existing_tasks: list[Task]) -> Task:
+        """
+        创建总结任务
+
+        当任务数量大于1时，添加一个总结任务作为最后一个任务，
+        依赖所有其他任务。
+
+        Args:
+            existing_tasks: 已创建的任务列表
+
+        Returns:
+            Task: 总结任务对象
+        """
+        # 获取所有已有任务的ID作为依赖
+        all_task_ids = [task["id"] for task in existing_tasks]
+
+        summary_task = Task(
+            id=f"task_{len(existing_tasks)}",
+            type=TaskType.SUMMARY,
+            description="总结所有子任务输出，生成连贯的整合回复",
+            agent_name="summary_sub_agent",
+            input_data={
+                "depends_on_tasks": all_task_ids,
+                "summary_type": "multi_task_aggregation"
+            },
+            depends_on=all_task_ids,  # 依赖所有其他任务
+            status=TaskStatus.PENDING,
+            output_data=None,
+            error=None
+        )
+
+        logger.info(f"创建总结任务: {summary_task['id']}, 依赖: {all_task_ids}")
+        return summary_task
 
     def _map_intent_to_agent(self, intent: str) -> str:
         """

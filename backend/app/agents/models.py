@@ -22,6 +22,7 @@ class TaskType(str, Enum):
     FEEDBACK = "feedback"
     EXPLANATION = "explanation"
     ANALYSIS = "analysis"
+    SUMMARY = "summary"  # 总结性智能体，用于总结多个子任务的输出
 
 
 class ExecutionMode(str, Enum):

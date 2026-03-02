@@ -210,13 +210,14 @@ class TaskExecutor:
             async def task_wrapper(task: Task):
                 """包装任务执行，将输出放入队列"""
                 task_id = task["id"]
+                agent_name = task.get("agent_name")
 
                 # 通知任务开始
                 await output_queue.put({
                     "type": "task_started",
                     "task_id": task_id,
                     "task_type": task.get("type"),
-                    "agent_name": task.get("agent_name")
+                    "agent_name": agent_name
                 })
 
                 try:
@@ -236,9 +237,10 @@ class TaskExecutor:
                             if isinstance(chunk.get("output_data"), dict):
                                 # 这是最终的 Task 对象
                                 continue
-                            # 添加任务ID并放入队列
+                            # 添加任务ID和agent信息并放入队列
                             chunk_with_id = chunk.copy()
                             chunk_with_id["task_id"] = task_id
+                            chunk_with_id["agent"] = agent_name
                             await output_queue.put(chunk_with_id)
 
                     # 通知任务完成
@@ -436,11 +438,15 @@ class TaskExecutor:
                 plan = None
 
                 async for chunk in agent.stream(state):
+                    # 添加 agent 信息到 chunk，让前端能正确路由
+                    chunk_with_agent = chunk.copy()
+                    chunk_with_agent["agent"] = agent_name
+                    chunk_with_agent["task_id"] = task_id
                     # 立即 yield 到前端，实现真正的实时流式输出
-                    yield chunk
+                    yield chunk_with_agent
 
                     # 同时收集到本地用于最终返回
-                    chunks.append(chunk)
+                    chunks.append(chunk_with_agent)
 
                     if chunk.get("type") == "plan":
                         plan = chunk.get("plan")
@@ -487,11 +493,15 @@ class TaskExecutor:
                 explanation_content = ""
 
                 async for chunk in agent.stream(state):
+                    # 添加 agent 信息到 chunk，让前端能正确路由
+                    chunk_with_agent = chunk.copy()
+                    chunk_with_agent["agent"] = agent_name
+                    chunk_with_agent["task_id"] = task_id
                     # 立即 yield 到前端
-                    yield chunk
+                    yield chunk_with_agent
 
                     # 同时收集到本地
-                    chunks.append(chunk)
+                    chunks.append(chunk_with_agent)
 
                     if chunk.get("type") == "chunk":
                         explanation_content += chunk.get("content", "")
@@ -527,17 +537,64 @@ class TaskExecutor:
                 chat_content = ""
 
                 async for chunk in agent.stream(state):
+                    # 添加 agent 信息到 chunk，让前端能正确路由
+                    chunk_with_agent = chunk.copy()
+                    chunk_with_agent["agent"] = agent_name
+                    chunk_with_agent["task_id"] = task_id
                     # 立即 yield 到前端
-                    yield chunk
+                    yield chunk_with_agent
 
                     # 同时收集到本地
-                    chunks.append(chunk)
+                    chunks.append(chunk_with_agent)
 
                     if chunk.get("type") == "chunk":
                         chat_content += chunk.get("content", "")
 
                 task["output_data"] = {
                     "content": chat_content,
+                    "chunks": chunks
+                }
+
+                context.set_task_result(task_id, task["output_data"])
+
+                # 任务完成后 yield Task 对象
+                yield task
+
+            elif task_type == "summary":
+                # 总结任务 - 收集所有前置任务的输出并生成总结
+                task_outputs = self._collect_task_outputs(context, task.get("depends_on", []))
+
+                state = {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "user_profile": user_profile,
+                    "user_message": original_message,
+                    "task_outputs": task_outputs,
+                    "history": history,
+                    "context_summary": context_summary,
+                    "recent_memories": recent_memories
+                }
+
+                # 执行并实时 yield 结果
+                chunks = []
+                summary_content = ""
+
+                async for chunk in agent.stream(state):
+                    # 添加 agent 信息到 chunk，让前端能正确路由
+                    chunk_with_agent = chunk.copy()
+                    chunk_with_agent["agent"] = agent_name
+                    chunk_with_agent["task_id"] = task_id
+                    # 立即 yield 到前端
+                    yield chunk_with_agent
+
+                    # 同时收集到本地
+                    chunks.append(chunk_with_agent)
+
+                    if chunk.get("type") == "chunk":
+                        summary_content += chunk.get("content", "")
+
+                task["output_data"] = {
+                    "content": summary_content,
                     "chunks": chunks
                 }
 
@@ -576,6 +633,34 @@ class TaskExecutor:
 
             # 异常时也 yield Task 对象
             yield task
+
+    def _collect_task_outputs(
+        self,
+        context: SharedContextPool,
+        task_ids: list[str]
+    ) -> list[dict]:
+        """
+        收集指定任务的输出结果
+
+        Args:
+            context: 共享上下文
+            task_ids: 任务ID列表
+
+        Returns:
+            list[dict]: 任务输出列表，每个包含 task_id, task_type, content
+        """
+        outputs = []
+
+        for task_id in task_ids:
+            result = context.get_task_result(task_id)
+            if result:
+                outputs.append({
+                    "task_id": task_id,
+                    "task_type": result.get("task_type", "unknown"),
+                    "content": result.get("content", "")
+                })
+
+        return outputs
 
     def _build_explanation_message(self, original_message: str, plan: dict | None) -> str:
         """

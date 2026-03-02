@@ -48,7 +48,10 @@ class ResultAggregator:
         logger.info(f"聚合结果，任务类型: {list(results_by_type.keys())}")
 
         # 根据任务组合选择聚合策略
-        if "workout" in results_by_type and "explanation" in results_by_type:
+        # 优先处理 summary 任务的结果（当存在 summary 任务时，使用其生成的总结）
+        if "summary" in results_by_type:
+            return self._aggregate_summary_result(results_by_type)
+        elif "workout" in results_by_type and "explanation" in results_by_type:
             return self._aggregate_workout_with_explanation(results_by_type)
         elif "workout" in results_by_type and "chat" in results_by_type:
             return self._aggregate_workout_with_chat(results_by_type)
@@ -190,5 +193,37 @@ class ResultAggregator:
             content="处理完成",
             plan=None,
             response_format="text",
+            tasks_output=results
+        )
+
+    def _aggregate_summary_result(self, results: dict) -> AggregatedResult:
+        """
+        聚合 summary 任务的结果
+
+        当存在 summary 任务时，优先使用其生成的总结内容作为最终结果。
+        同时保留 workout 计划（如果有的话）。
+        """
+        summary_result = results.get("summary", {})
+        workout_result = results.get("workout", {})
+
+        # 使用 summary 的内容作为最终回复
+        content = summary_result.get("content", "")
+
+        # 如果存在 workout 计划，保留它
+        plan = workout_result.get("plan") if workout_result else None
+
+        # 确定结果类型
+        if plan:
+            result_type = "summary_with_workout"
+            response_format = "markdown_with_json"
+        else:
+            result_type = "summary"
+            response_format = "markdown"
+
+        return AggregatedResult(
+            type=result_type,
+            content=content,
+            plan=plan,
+            response_format=response_format,
             tasks_output=results
         )

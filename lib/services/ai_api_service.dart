@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../models/workout.dart';
@@ -19,6 +20,10 @@ class AIStreamChunk {
   final String? agent;
   final String? agentStatus;
   final String? taskType;
+  // PlannerAgent 规划阶段字段
+  final Map<String, dynamic>? analysis;
+  final List<dynamic>? executionOrder;
+  final List<dynamic>? parallelGroups;
 
   AIStreamChunk({
     required this.type,
@@ -31,6 +36,9 @@ class AIStreamChunk {
     this.agent,
     this.agentStatus,
     this.taskType,
+    this.analysis,
+    this.executionOrder,
+    this.parallelGroups,
   });
 
   factory AIStreamChunk.fromJson(Map<String, dynamic> json) {
@@ -47,6 +55,9 @@ class AIStreamChunk {
       agent: json['agent'] as String?,
       agentStatus: json['status'] as String?,
       taskType: json['task_type'] as String?,
+      analysis: json['analysis'] as Map<String, dynamic>?,
+      executionOrder: json['execution_order'] as List<dynamic>?,
+      parallelGroups: json['parallel_groups'] as List<dynamic>?,
     );
   }
 }
@@ -60,6 +71,8 @@ enum AIStreamType {
   sessionCreated, // 新会话创建
   saved, // 计划已保存
   agentStatus, // Agent 执行状态
+  analysis, // 任务分析（PlannerAgent规划阶段）
+  planInfo, // 任务规划信息（PlannerAgent规划阶段）
   unknown;
 
   factory AIStreamType.fromString(String type) {
@@ -78,6 +91,10 @@ enum AIStreamType {
         return AIStreamType.saved;
       case 'agent_status':
         return AIStreamType.agentStatus;
+      case 'analysis':
+        return AIStreamType.analysis;
+      case 'plan_info':
+        return AIStreamType.planInfo;
       default:
         return AIStreamType.unknown;
     }
@@ -141,9 +158,13 @@ class AIApiService {
             if (dataStr.startsWith('{')) {
               try {
                 final data = jsonDecode(dataStr) as Map<String, dynamic>;
+                // 只记录非chunk类型的日志，避免输出过多
+                if (data['type'] != 'chunk') {
+                  debugPrint('[AIApiService] 收到SSE: type=${data['type']}');
+                }
                 yield AIStreamChunk.fromJson(data);
               } catch (e) {
-                // 忽略解析错误
+                debugPrint('[AIApiService] JSON解析错误: $e');
               }
             }
             dataBuffer = StringBuffer();

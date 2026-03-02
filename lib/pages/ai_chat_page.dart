@@ -4,8 +4,10 @@ import 'package:flutter/services.dart';
 import '../models/chat_message.dart';
 import '../models/exercise.dart';
 import '../models/workout.dart';
+import '../models/agent_output.dart';
 import '../widgets/bottom_nav.dart';
 import '../widgets/empty_state_widget.dart';
+import '../widgets/agent_accordion.dart';
 import '../providers/chat_provider.dart';
 import '../services/network_service.dart';
 import 'chat_sessions_page.dart';
@@ -16,10 +18,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 class AiChatPage extends StatefulWidget {
   final Function(String) onNavigate;
 
-  const AiChatPage({
-    super.key,
-    required this.onNavigate,
-  });
+  const AiChatPage({super.key, required this.onNavigate});
 
   @override
   State<AiChatPage> createState() => _AiChatPageState();
@@ -51,7 +50,8 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   late AnimationController _slideController;
 
   // Markdown 样式表缓存（避免重复创建）
-  static final MarkdownStyleSheet _cachedMarkdownStyleSheet = MarkdownStyleSheet(
+  static final MarkdownStyleSheet
+  _cachedMarkdownStyleSheet = MarkdownStyleSheet(
     p: TextStyle(
       color: const Color(0xFF1F2937),
       fontSize: 15,
@@ -119,12 +119,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     ),
     blockquotePadding: const EdgeInsets.only(left: 12),
     horizontalRuleDecoration: BoxDecoration(
-      border: Border(
-        top: BorderSide(
-          color: const Color(0xFFE5E7EB),
-          width: 1,
-        ),
-      ),
+      border: Border(top: BorderSide(color: const Color(0xFFE5E7EB), width: 1)),
     ),
     strong: TextStyle(
       color: const Color(0xFF1F2937),
@@ -146,19 +141,10 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
       fontWeight: FontWeight.bold,
       fontFamily: null,
     ),
-    tableBody: TextStyle(
-      color: const Color(0xFF1F2937),
-      fontFamily: null,
-    ),
+    tableBody: TextStyle(color: const Color(0xFF1F2937), fontFamily: null),
     tableBorder: TableBorder(
-      horizontalInside: BorderSide(
-        color: const Color(0xFFE5E7EB),
-        width: 1,
-      ),
-      verticalInside: BorderSide(
-        color: const Color(0xFFE5E7EB),
-        width: 1,
-      ),
+      horizontalInside: BorderSide(color: const Color(0xFFE5E7EB), width: 1),
+      verticalInside: BorderSide(color: const Color(0xFFE5E7EB), width: 1),
     ),
     tableCellsPadding: const EdgeInsets.all(8),
   );
@@ -185,9 +171,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     // 等待动画和布局完成后再滚动
     Future.delayed(const Duration(milliseconds: 800), () {
       if (mounted && _scrollController.hasClients) {
-        _scrollController.jumpTo(
-          _scrollController.position.maxScrollExtent,
-        );
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
       }
     });
   }
@@ -303,9 +287,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                     // 顶部标题栏
                     _buildHeader(),
                     // Messages List
-                    Expanded(
-                      child: _buildChatArea(),
-                    ),
+                    Expanded(child: _buildChatArea()),
 
                     // Input Area
                     _buildInputArea(),
@@ -375,7 +357,10 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF2DD4BF),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -422,10 +407,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                     if (provider.currentSessionId != null)
                       Text(
                         '当前对话',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                   ],
                 );
@@ -447,11 +429,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
 
   /// 打开会话列表
   void _openSessionList(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const ChatSessionsPage(),
-      ),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ChatSessionsPage()));
   }
 
   /// 背景装饰
@@ -525,20 +505,19 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   /// 聊天区域
   Widget _buildChatArea() {
     return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(0, 0.1),
-        end: Offset.zero,
-      ).animate(CurvedAnimation(
-        parent: _slideController,
-        curve: Curves.easeOut,
-      )),
+      position: Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero)
+          .animate(
+            CurvedAnimation(parent: _slideController, curve: Curves.easeOut),
+          ),
       child: Consumer<ChatProvider>(
         builder: (context, chatProvider, child) {
           final messages = chatProvider.messages;
           // 没有选择会话时显示空状态
           if (chatProvider.currentSessionId == null) return _buildEmptyState();
           // 有消息时显示消息列表
-          if (messages.isNotEmpty) return _buildMessagesList(messages, chatProvider);
+          if (messages.isNotEmpty) {
+            return _buildMessagesList(messages, chatProvider);
+          }
           // 选择了会话但没有消息时显示空状态
           return _buildEmptyState();
         },
@@ -660,11 +639,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                 color: prompt.color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(
-                prompt.icon,
-                size: 18,
-                color: prompt.color,
-              ),
+              child: Icon(prompt.icon, size: 18, color: prompt.color),
             ),
             const SizedBox(height: 10),
             Text(
@@ -678,10 +653,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
             const SizedBox(height: 2),
             Text(
               prompt.desc,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[500],
-              ),
+              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
@@ -693,15 +665,141 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   }
 
   /// 消息列表
-  Widget _buildMessagesList(List<ChatMessage> messages, ChatProvider chatProvider) {
+  Widget _buildMessagesList(
+    List<ChatMessage> messages,
+    ChatProvider chatProvider,
+  ) {
+    // 过滤消息：流式输出期间，不显示当前正在生成的AI消息
+    final displayMessages = messages.where((msg) {
+      // 用户消息始终显示
+      if (msg.type == ChatMessageType.user) return true;
+      // AI消息：如果不是当前流式消息，则显示
+      if (msg.id == chatProvider.streamingMessageId) return false;
+      return true;
+    }).toList();
+
+    // 构建消息列表项
+    final List<Widget> messageWidgets = [];
+
+    for (int i = 0; i < displayMessages.length; i++) {
+      final message = displayMessages[i];
+
+      // 添加普通消息气泡
+      messageWidgets.add(
+        _buildMessageBubble(message, i, displayMessages, chatProvider),
+      );
+    }
+
+    // 在消息列表末尾添加Agent状态区域（仅多Agent情况显示Accordion）
+    if (chatProvider.shouldShowAgentAccordion &&
+        chatProvider.agentOutputs.isNotEmpty) {
+      messageWidgets.add(_buildAgentMessageBubble(chatProvider));
+    }
+
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      itemCount: messages.length,
-      itemBuilder: (context, index) {
-        final message = messages[index];
-        return _buildMessageBubble(message, index, messages, chatProvider);
-      },
+      itemCount: messageWidgets.length,
+      itemBuilder: (context, index) => messageWidgets[index],
+    );
+  }
+
+  /// 多Agent消息气泡（展示所有子Agent的手风琴）
+  Widget _buildAgentMessageBubble(ChatProvider chatProvider) {
+    final isStreaming = chatProvider.isStreaming;
+    final hasActiveAgents = chatProvider.agentOutputs.any(
+      (agent) => agent.status == AgentStatus.running,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildAvatar(isUser: false),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  topRight: Radius.circular(20),
+                  bottomLeft: Radius.circular(4),
+                  bottomRight: Radius.circular(20),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Agent状态标签
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isStreaming && hasActiveAgents
+                          ? const Color(0xFFDBEAFE)
+                          : const Color(0xFFD1FAE5),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isStreaming && hasActiveAgents)
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.blue[600]!,
+                              ),
+                            ),
+                          )
+                        else
+                          Icon(
+                            Icons.check_circle,
+                            size: 14,
+                            color: Colors.green[700],
+                          ),
+                        const SizedBox(width: 8),
+                        Text(
+                          isStreaming && hasActiveAgents
+                              ? '⏳ 多Agent协同处理中...'
+                              : '✅ Agent执行记录',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isStreaming && hasActiveAgents
+                                ? Colors.blue[700]
+                                : Colors.green[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Agent手风琴组件
+                  AgentAccordion(
+                    agents: chatProvider.agentOutputs,
+                    onToggle: (agentId) => chatProvider.toggleAgentExpanded(agentId),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -714,20 +812,23 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   ) {
     final isUser = message.type == ChatMessageType.user;
     final isStreaming = message.id == chatProvider.streamingMessageId;
-    final isEmptyAI = !isUser && message.content.trim().isEmpty;
 
     // 检查是否包含健身计划
     // 如果计划未响应，只在最后一条消息显示；如果已响应，始终显示（变灰状态）
-    final isPlanMessage = !isUser &&
+    final isPlanMessage =
+        !isUser &&
         message.dataType == ChatMessageDataType.workoutPlan &&
         chatProvider.pendingWorkoutPlan != null;
-    final hasWorkoutPlan = isPlanMessage &&
+    final hasWorkoutPlan =
+        isPlanMessage &&
         (chatProvider.isPlanResponded || index == messages.length - 1);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(
-        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isUser
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (!isUser) ...[
@@ -736,14 +837,19 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
           ],
           Flexible(
             child: Column(
-              crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              crossAxisAlignment: isUser
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
               children: [
                 GestureDetector(
                   onLongPress: !isStreaming && message.content.isNotEmpty
                       ? () => _copyMessage(message.content)
                       : null,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 14,
+                    ),
                     decoration: BoxDecoration(
                       gradient: isUser
                           ? const LinearGradient(
@@ -765,11 +871,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                         ),
                       ],
                     ),
-                    child: isEmptyAI && isStreaming
-                        ? _buildAgentIndicatorInBubble(chatProvider)
-                        : (isStreaming && !isUser
-                            ? _buildStreamingContent(message.content)
-                            : _buildMessageContent(message.content, isUser)),
+                    child: isStreaming && !isUser
+                        ? _buildStreamingContent(message.content)
+                        : _buildMessageContent(message.content, isUser),
                   ),
                 ),
                 // 健身计划预览
@@ -787,10 +891,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                     children: [
                       Text(
                         _formatTime(message.timestamp),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey[400],
-                        ),
+                        style: TextStyle(fontSize: 11, color: Colors.grey[400]),
                       ),
                       if (!isStreaming && message.content.isNotEmpty) ...[
                         const SizedBox(width: 8),
@@ -799,7 +900,10 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                           child: MouseRegion(
                             cursor: SystemMouseCursors.click,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -828,10 +932,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
               ],
             ),
           ),
-          if (isUser) ...[
-            const SizedBox(width: 8),
-            _buildAvatar(isUser: true),
-          ],
+          if (isUser) ...[const SizedBox(width: 8), _buildAvatar(isUser: true)],
         ],
       ),
     );
@@ -884,9 +985,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: _buildMarkdownBody(content, isStreaming: true),
-        ),
+        Expanded(child: _buildMarkdownBody(content, isStreaming: true)),
         const SizedBox(width: 4),
         _buildStreamingCursor(),
       ],
@@ -943,122 +1042,12 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     );
   }
 
-  /// 消息气泡内的 Agent 状态指示器（替代原来的打字动画）
-  Widget _buildAgentIndicatorInBubble(ChatProvider chatProvider) {
-    final agents = chatProvider.activeAgents;
-
-    if (agents.isEmpty) {
-      // 如果没有 agent 在执行，显示默认的打字动画
-      return _buildTypingAnimationInline();
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Agent 状态指示器列表
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: agents.map((agent) => _buildAgentChip(agent)).toList(),
-        ),
-      ],
-    );
-  }
-
-  /// 单个 Agent 状态 Chip
-  Widget _buildAgentChip(AgentExecutionStatus agent) {
-    // 根据 agent 类型和任务类型显示不同的文案
-    String label;
-    IconData icon;
-    final isActive = agent.isActive;
-
-    switch (agent.agent) {
-      case 'workout_sub_agent':
-        label = isActive ? '生成训练计划中...' : '训练计划已生成';
-        icon = Icons.fitness_center;
-        break;
-      case 'chat_sub_agent':
-        label = isActive ? 'AI 思考中...' : '已响应';
-        icon = Icons.psychology;
-        break;
-      default:
-        label = isActive ? '处理中...' : '已完成';
-        icon = Icons.hourglass_empty;
-    }
-
-    // 已完成状态使用不同的颜色
-    final Color chipColor = isActive
-        ? const Color(0xFF8B5CF6)
-        : const Color(0xFF10B981); // 绿色表示完成
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: chipColor.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: chipColor.withValues(alpha: 0.3),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (isActive) ...[
-            SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(chipColor),
-              ),
-            ),
-          ] else ...[
-            Icon(Icons.check_circle, size: 14, color: chipColor),
-          ],
-          const SizedBox(width: 6),
-          Icon(icon, size: 14, color: chipColor),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: chipColor,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 消息气泡内联打字动画
-  Widget _buildTypingAnimationInline() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(3, (index) {
-        return AnimatedBuilder(
-          animation: _pulseController,
-          builder: (context, child) {
-            final delay = index * 0.2;
-            final value = ((_pulseController.value - delay + 1) % 1);
-            return Container(
-              margin: EdgeInsets.only(left: index > 0 ? 6 : 0),
-              width: 8 + (value * 4),
-              height: 8 + (value * 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2DD4BF).withValues(alpha: 0.3 + (value * 0.7)),
-                shape: BoxShape.circle,
-              ),
-            );
-          },
-        );
-      }).toList(),
-    );
-  }
-
   /// 健身计划预览卡片
-  Widget _buildWorkoutPlanPreview(WorkoutPlan plan, ChatProvider chatProvider, bool isResponded) {
+  Widget _buildWorkoutPlanPreview(
+    WorkoutPlan plan,
+    ChatProvider chatProvider,
+    bool isResponded,
+  ) {
     final isConfirmed = chatProvider.isPlanConfirmed;
 
     return Container(
@@ -1306,7 +1295,11 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
             const SizedBox(height: 8),
             Row(
               children: [
-                Icon(Icons.description_outlined, size: 14, color: Colors.grey[600]),
+                Icon(
+                  Icons.description_outlined,
+                  size: 14,
+                  color: Colors.grey[600],
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -1326,7 +1319,11 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.checklist_rounded, size: 14, color: Colors.grey[600]),
+                Icon(
+                  Icons.checklist_rounded,
+                  size: 14,
+                  color: Colors.grey[600],
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -1345,7 +1342,11 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
             const SizedBox(height: 6),
             Row(
               children: [
-                Icon(Icons.lightbulb_outline_rounded, size: 14, color: Colors.amber[700]),
+                Icon(
+                  Icons.lightbulb_outline_rounded,
+                  size: 14,
+                  color: Colors.amber[700],
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -1369,10 +1370,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                 Expanded(
                   child: Text(
                     '呼吸: ${exercise.breathing}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[700],
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                   ),
                 ),
               ],
@@ -1385,7 +1383,10 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
               runSpacing: 4,
               children: exercise.targetMuscles.map((muscle) {
                 return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF115E59).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(4),
@@ -1425,10 +1426,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            child: Text(
-              '取消',
-              style: TextStyle(color: Colors.grey[700]),
-            ),
+            child: Text('取消', style: TextStyle(color: Colors.grey[700])),
           ),
         ),
         const SizedBox(width: 12),
@@ -1455,10 +1453,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                   )
                 : const Text(
                     '确定应用',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                   ),
           ),
         ),
@@ -1472,13 +1467,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
       children: [
         Icon(icon, size: 14, color: Colors.grey[600]),
         const SizedBox(width: 4),
-        Text(
-          text,
-          style: const TextStyle(
-            fontSize: 12,
-            color: Colors.grey,
-          ),
-        ),
+        Text(text, style: const TextStyle(fontSize: 12, color: Colors.grey)),
       ],
     );
   }
@@ -1547,10 +1536,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                     decoration: BoxDecoration(
                       gradient: chatProvider.isStreaming
                           ? LinearGradient(
-                              colors: [
-                                Colors.grey[300]!,
-                                Colors.grey[400]!
-                              ],
+                              colors: [Colors.grey[300]!, Colors.grey[400]!],
                             )
                           : const LinearGradient(
                               colors: [Color(0xFF2DD4BF), Color(0xFF14B8A6)],
@@ -1560,7 +1546,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                           ? null
                           : [
                               BoxShadow(
-                                color: const Color(0xFF2DD4BF).withValues(alpha: 0.4),
+                                color: const Color(
+                                  0xFF2DD4BF,
+                                ).withValues(alpha: 0.4),
                                 blurRadius: 12,
                                 offset: const Offset(0, 4),
                               ),
@@ -1572,7 +1560,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                             height: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
                             ),
                           )
                         : const Icon(

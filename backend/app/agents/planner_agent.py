@@ -18,6 +18,7 @@ from app.agents.shared_context import SharedContextPool
 from app.agents.result_aggregator import ResultAggregator
 from app.agents.chat_sub_agent import ChatSubAgent
 from app.agents.workout_sub_agent import WorkoutSubAgent
+from app.agents.summary_sub_agent import SummarySubAgent
 from app.agents.models import ExecutionPlan, TaskAnalysis, ExecutionMode
 
 logger = logging.getLogger(__name__)
@@ -39,11 +40,13 @@ class PlannerAgent:
         # 初始化 SubAgents
         self.chat_sub_agent = ChatSubAgent()
         self.workout_sub_agent = WorkoutSubAgent()
+        self.summary_sub_agent = SummarySubAgent()
 
         # Agent 注册表
         self.agent_registry = {
             "chat_sub_agent": self.chat_sub_agent,
-            "workout_sub_agent": self.workout_sub_agent
+            "workout_sub_agent": self.workout_sub_agent,
+            "summary_sub_agent": self.summary_sub_agent
         }
 
         # 初始化核心组件
@@ -57,6 +60,7 @@ class PlannerAgent:
         print(f"   - TaskPlanner: 任务规划")
         print(f"   - TaskExecutor: 任务执行")
         print(f"   - ResultAggregator: 结果聚合")
+        print(f"   - SummarySubAgent: 结果总结")
         print("="*60 + "\n")
 
     async def process(
