@@ -49,6 +49,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   late AnimationController _pulseController;
   late AnimationController _slideController;
 
+  // 跟踪已展开的训练计划卡片 (使用计划ID或消息索引)
+  final Set<String> _expandedPlanCards = {};
+
   // Markdown 样式表缓存（避免重复创建）
   static final MarkdownStyleSheet
   _cachedMarkdownStyleSheet = MarkdownStyleSheet(
@@ -882,6 +885,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                     chatProvider.pendingWorkoutPlan!,
                     chatProvider,
                     chatProvider.isPlanResponded,
+                    message.id,
                   ),
                 // 时间戳和复制按钮
                 Padding(
@@ -1047,12 +1051,13 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     WorkoutPlan plan,
     ChatProvider chatProvider,
     bool isResponded,
+    String planId,
   ) {
     final isConfirmed = chatProvider.isPlanConfirmed;
+    final isExpanded = _expandedPlanCards.contains(planId);
 
     return Container(
       margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
@@ -1069,20 +1074,82 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildPlanHeader(plan),
-          const SizedBox(height: 12),
-          _buildPlanStats(plan),
-          const SizedBox(height: 12),
-          ...plan.modules.asMap().entries.map((entry) {
-            final index = entry.key;
-            final module = entry.value;
-            return _buildModuleDetail(module, index + 1);
-          }),
-          const SizedBox(height: 16),
-          if (!isResponded)
-            _buildActionButtons(plan, chatProvider)
-          else
-            _buildResponseStatus(isConfirmed),
+          // 可点击的标题栏
+          InkWell(
+            onTap: () {
+              setState(() {
+                if (isExpanded) {
+                  _expandedPlanCards.remove(planId);
+                } else {
+                  _expandedPlanCards.add(planId);
+                }
+              });
+            },
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildPlanHeader(plan),
+                  const SizedBox(height: 12),
+                  _buildPlanStats(plan),
+                  const SizedBox(height: 8),
+                  // 展开/收起指示器
+                  Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isExpanded
+                              ? Icons.keyboard_arrow_up
+                              : Icons.keyboard_arrow_down,
+                          color: const Color(0xFF2DD4BF),
+                          size: 20,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          isExpanded ? '点击收起' : '点击展开详情',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: const Color(0xFF2DD4BF),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 可展开的内容
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ...plan.modules.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final module = entry.value;
+                    return _buildModuleDetail(module, index + 1);
+                  }),
+                  const SizedBox(height: 16),
+                  if (!isResponded)
+                    _buildActionButtons(plan, chatProvider)
+                  else
+                    _buildResponseStatus(isConfirmed),
+                ],
+              ),
+            ),
+            crossFadeState:
+                isExpanded
+                    ? CrossFadeState.showSecond
+                    : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 300),
+          ),
         ],
       ),
     );
