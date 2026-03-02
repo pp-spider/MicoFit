@@ -130,9 +130,10 @@ class TaskExecutor:
         recent_memories: list[str] | None = None
     ) -> AsyncGenerator[dict, None]:
         """
-        并行执行任务
+        并行执行任务（支持实时流式输出）
 
         按照 parallel_groups 分批执行，同批次内并行执行，批次间串行执行。
+        使用多路复用机制实现并行任务的实时流式输出。
 
         Args:
             plan: 执行计划
@@ -149,8 +150,10 @@ class TaskExecutor:
             dict: 流式响应块
             - {"type": "batch_start", "batch_index": int, "tasks": [...]}
             - {"type": "batch_complete", "batch_index": int}
+            - {"type": "task_started", "task_id": str}
+            - {"type": "task_completed", "task_id": str}
             - {"type": "task_error", "task_id": str, "error": str}
-            - 各任务产生的 chunks
+            - 各任务产生的 chunks（带 task_id 标记）
         """
         tasks = plan.get("tasks", [])
         parallel_groups = plan.get("parallel_groups", [])
@@ -197,61 +200,107 @@ class TaskExecutor:
                 logger.warning(f"批次 {batch_idx} 没有有效任务")
                 continue
 
-            logger.info(f"批次 {batch_idx}: 并行执行 {len(tasks_in_batch)} 个任务: {[t['id'] for t in tasks_in_batch]}")
+            batch_task_ids_set = {t["id"] for t in tasks_in_batch}
+            logger.info(f"批次 {batch_idx}: 并行流式执行 {len(tasks_in_batch)} 个任务: {list(batch_task_ids_set)}")
 
-            # 创建并行执行的任务
-            coroutines = [
-                self._execute_single_task(
-                    task=task,
-                    context=context,
-                    user_id=user_id,
-                    session_id=session_id,
-                    original_message=user_message,
-                    user_profile=user_profile,
-                    history=history,
-                    context_summary=context_summary,
-                    recent_memories=recent_memories
-                )
-                for task in tasks_in_batch
-            ]
+            # 使用队列进行多路复用
+            output_queue: asyncio.Queue[dict] = asyncio.Queue()
+            completed_events = {t["id"]: asyncio.Event() for t in tasks_in_batch}
 
-            # 并行执行并等待所有任务完成
-            batch_timeout = len(tasks_in_batch) * 60.0  # 每个任务60秒
-            try:
-                batch_results = await asyncio.wait_for(
-                    asyncio.gather(*coroutines, return_exceptions=True),
-                    timeout=batch_timeout
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"批次 {batch_idx} 执行超时")
-                batch_results = [TimeoutError(f"批次 {batch_idx} 超时")] * len(tasks_in_batch)
-
-            # 处理批次结果
-            for task, result in zip(tasks_in_batch, batch_results):
+            async def task_wrapper(task: Task):
+                """包装任务执行，将输出放入队列"""
                 task_id = task["id"]
 
-                if isinstance(result, Exception):
-                    # 任务执行失败
-                    logger.error(f"任务 {task_id} 执行失败: {result}")
-                    task["status"] = TaskStatus.FAILED
-                    task["error"] = str(result)
-                    yield {
-                        "type": "task_error",
-                        "task_id": task_id,
-                        "error": str(result)
-                    }
-                else:
-                    # 任务执行成功
-                    task["status"] = TaskStatus.COMPLETED
-                    task["output_data"] = result.get("output_data", {})
+                # 通知任务开始
+                await output_queue.put({
+                    "type": "task_started",
+                    "task_id": task_id,
+                    "task_type": task.get("type"),
+                    "agent_name": task.get("agent_name")
+                })
 
-                    # 输出该任务的所有 chunks（带 task_id 标记）
-                    for chunk in result.get("chunks", []):
+                try:
+                    async for chunk in self._execute_task(
+                        task=task,
+                        context=context,
+                        user_id=user_id,
+                        session_id=session_id,
+                        original_message=user_message,
+                        user_profile=user_profile,
+                        history=history,
+                        context_summary=context_summary,
+                        recent_memories=recent_memories
+                    ):
+                        # 过滤掉 Task 对象，只收集 dict chunks
                         if isinstance(chunk, dict):
-                            # 添加任务ID以便前端区分
+                            if isinstance(chunk.get("output_data"), dict):
+                                # 这是最终的 Task 对象
+                                continue
+                            # 添加任务ID并放入队列
                             chunk_with_id = chunk.copy()
                             chunk_with_id["task_id"] = task_id
-                            yield chunk_with_id
+                            await output_queue.put(chunk_with_id)
+
+                    # 通知任务完成
+                    await output_queue.put({
+                        "type": "task_completed",
+                        "task_id": task_id
+                    })
+                    task["status"] = TaskStatus.COMPLETED
+
+                except Exception as e:
+                    logger.error(f"任务 {task_id} 执行失败: {e}")
+                    task["status"] = TaskStatus.FAILED
+                    task["error"] = str(e)
+                    await output_queue.put({
+                        "type": "task_error",
+                        "task_id": task_id,
+                        "error": str(e)
+                    })
+                finally:
+                    completed_events[task_id].set()
+
+            # 启动所有任务
+            bg_tasks = [asyncio.create_task(task_wrapper(t)) for t in tasks_in_batch]
+
+            # 等待所有任务完成，同时转发队列中的输出
+            remaining_tasks = set(batch_task_ids_set)
+            timeout_per_task = 60.0
+            total_timeout = len(tasks_in_batch) * timeout_per_task
+            start_time = asyncio.get_event_loop().time()
+
+            while remaining_tasks:
+                # 检查总超时
+                elapsed = asyncio.get_event_loop().time() - start_time
+                if elapsed > total_timeout:
+                    logger.error(f"批次 {batch_idx} 执行超时")
+                    break
+
+                # 检查哪些任务已完成
+                done_tasks = {tid for tid in remaining_tasks if completed_events[tid].is_set()}
+                remaining_tasks -= done_tasks
+
+                if remaining_tasks:
+                    # 还有任务在运行，尝试获取输出（带短超时）
+                    try:
+                        chunk = await asyncio.wait_for(output_queue.get(), timeout=0.05)
+                        yield chunk
+                    except asyncio.TimeoutError:
+                        continue
+                else:
+                    # 所有任务已完成，清空队列
+                    while not output_queue.empty():
+                        chunk = output_queue.get_nowait()
+                        yield chunk
+
+            # 取消任何可能还在运行的任务
+            for bg_task in bg_tasks:
+                if not bg_task.done():
+                    bg_task.cancel()
+                    try:
+                        await bg_task
+                    except asyncio.CancelledError:
+                        pass
 
             # 通知批次完成
             yield {

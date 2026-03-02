@@ -205,7 +205,7 @@ class PlannerAgent:
                         logger.error(f"任务 {result.get('task_id')} 失败: {result.get('error')}")
                         yield result
 
-                    elif result_type in ("chunk", "plan", "agent_status"):
+                    elif result_type in ("chunk", "plan", "agent_status", "task_started", "task_completed"):
                         # 收集chunks用于结果聚合
                         if result_type == "chunk":
                             all_chunks.append(result)
@@ -217,7 +217,13 @@ class PlannerAgent:
                         if result_type == "done":
                             continue
 
-                        # 实时 yield 到前端
+                        # 记录任务状态变化
+                        if result_type == "task_started":
+                            logger.info(f"任务 {result.get('task_id')} 开始执行")
+                        elif result_type == "task_completed":
+                            logger.info(f"任务 {result.get('task_id')} 完成")
+
+                        # 实时 yield 到前端（带 task_id 标记）
                         yield result
 
                 print(f"\n✅ 并行执行完成\n")
