@@ -2,6 +2,7 @@ import 'dart:convert';
 import '../services/http_client.dart';
 import '../models/chat_session.dart';
 import '../models/chat_message.dart';
+import '../models/agent_output.dart';
 
 /// 聊天会话 API 服务
 class ChatSessionApiService {
@@ -106,5 +107,21 @@ class ChatSessionApiService {
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return ChatSession.fromJson(data);
+  }
+
+  /// 更新消息的 Agent 输出
+  Future<void> updateMessageAgentOutputs(
+    String sessionId,
+    String messageId,
+    List<Map<String, dynamic>> agentOutputs,
+  ) async {
+    final response = await _httpClient.patch(
+      '/api/v1/chat-sessions/$sessionId/messages/$messageId/agent-outputs',
+      body: jsonEncode({'agent_outputs': agentOutputs}),
+    );
+
+    if (!ApiHttpClient.isSuccess(response)) {
+      throw Exception(ApiHttpClient.getErrorMessage(response));
+    }
   }
 }

@@ -101,7 +101,8 @@ class ChatService:
         structured_data: dict | None = None,
         data_type: str | None = None,
         tool_calls: list | None = None,
-        tool_call_id: str | None = None
+        tool_call_id: str | None = None,
+        agent_outputs: list | None = None
     ) -> ChatMessage:
         """
         添加消息
@@ -114,6 +115,7 @@ class ChatService:
             data_type: 数据类型
             tool_calls: 工具调用信息
             tool_call_id: 工具调用ID
+            agent_outputs: Agent 执行输出
 
         Returns:
             ChatMessage: 创建的消息
@@ -127,6 +129,7 @@ class ChatService:
             data_type=data_type,
             tool_calls=tool_calls,
             tool_call_id=tool_call_id,
+            agent_outputs=agent_outputs,
         )
 
         self.db.add(message)

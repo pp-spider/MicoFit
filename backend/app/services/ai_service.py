@@ -196,8 +196,8 @@ class AIService:
                     # 保存失败时仍然返回原始计划，但不返回plan_id
                     yield chunk
             elif chunk["type"] == "done":
-                # 保存AI回复
-                await self.context_service.add_message_and_update_summary(
+                # 保存AI回复并获取消息对象
+                message = await self.context_service.add_message_and_update_summary(
                     session_id=session_id,
                     role="assistant",
                     content=full_content,
@@ -207,7 +207,8 @@ class AIService:
                 yield {
                     "type": "done",
                     "session_id": session_id,
-                    "has_plan": workout_plan is not None
+                    "has_plan": workout_plan is not None,
+                    "message_id": str(message.id)  # 返回后端生成的消息ID
                 }
             elif chunk["type"] == "agent_status":
                 # Agent 状态事件，透传到前端
@@ -329,7 +330,7 @@ class AIService:
                     yield chunk
             elif chunk["type"] == "done":
                 # 更新已有消息或添加新消息
-                await self.context_service.add_message_and_update_summary(
+                message = await self.context_service.add_message_and_update_summary(
                     session_id=session_id,
                     role="assistant",
                     content=full_content,
@@ -339,7 +340,8 @@ class AIService:
                 yield {
                     "type": "done",
                     "session_id": session_id,
-                    "has_plan": workout_plan is not None
+                    "has_plan": workout_plan is not None,
+                    "message_id": str(message.id)  # 返回后端生成的消息ID
                 }
             elif chunk["type"] == "error":
                 yield chunk

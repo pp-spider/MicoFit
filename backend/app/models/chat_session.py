@@ -63,6 +63,9 @@ class ChatMessage(Base):
     # 工具调用ID（用于关联工具调用和结果）
     tool_call_id = Column(String(100), nullable=True)
 
+    # Agent 执行输出（用于多 Agent 场景）
+    agent_outputs = Column(JSON, nullable=True)
+
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

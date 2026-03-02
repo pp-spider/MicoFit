@@ -16,6 +16,7 @@ class AIStreamChunk {
   final String? planId;
   final bool? hasPlan;
   final String? message;
+  final String? messageId;  // 后端生成的消息ID（UUID）
   // Agent 状态相关字段
   final String? agent;
   final String? agentStatus;
@@ -33,6 +34,7 @@ class AIStreamChunk {
     this.planId,
     this.hasPlan,
     this.message,
+    this.messageId,  // 后端生成的消息ID
     this.agent,
     this.agentStatus,
     this.taskType,
@@ -52,6 +54,7 @@ class AIStreamChunk {
       planId: json['plan_id'] as String?,
       hasPlan: json['has_plan'] as bool?,
       message: json['message'] as String?,
+      messageId: json['message_id'] as String?,  // 后端消息ID
       agent: json['agent'] as String?,
       agentStatus: json['status'] as String?,
       taskType: json['task_type'] as String?,

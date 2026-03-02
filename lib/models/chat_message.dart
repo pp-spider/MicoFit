@@ -99,12 +99,13 @@ class ChatMessage {
 
   /// 创建包含Agent输出的AI消息
   factory ChatMessage.withAgentOutputs({
+    String? id,  // 可选的消息ID，用于同步后端UUID
     required String content,
     required List<AgentOutput> agentOutputs,
     Map<String, dynamic>? workoutPlanJson,
   }) {
     return ChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: id ?? DateTime.now().millisecondsSinceEpoch.toString(),  // 使用传入的ID或生成新ID
       type: ChatMessageType.assistant,
       content: content,
       timestamp: DateTime.now(),
@@ -150,6 +151,9 @@ class ChatMessage {
             )
           : null,
       sessionId: json['session_id'] as String?,
+      agentOutputs: (json['agent_outputs'] as List<dynamic>?)
+          ?.map((e) => AgentOutput.fromJson(e as Map<String, dynamic>))
+          .toList(),
     );
   }
 

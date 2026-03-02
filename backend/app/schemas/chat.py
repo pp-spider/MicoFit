@@ -11,6 +11,7 @@ class ChatMessageSchema(BaseModel):
     content: str
     structured_data: Optional[dict] = None
     data_type: Optional[str] = None
+    agent_outputs: Optional[list] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -48,6 +49,7 @@ class ChatStreamChunk(BaseModel):
     plan_id: Optional[str] = None
     has_plan: Optional[bool] = None
     message: Optional[str] = None
+    message_id: Optional[str] = None  # 后端生成的消息ID（UUID）
 
 
 class ChatSessionCreateRequest(BaseModel):

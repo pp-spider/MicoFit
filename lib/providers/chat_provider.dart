@@ -693,8 +693,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             break;
 
           case AIStreamType.done:
-            // 完成
-            await _handleStreamDone(receivedPlan);
+            // 完成，传递后端返回的消息ID
+            await _handleStreamDone(receivedPlan, backendMessageId: chunk.messageId);
             return;
 
           case AIStreamType.error:
@@ -741,7 +741,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// 处理流式完成
-  Future<void> _handleStreamDone(WorkoutPlan? plan) async {
+  Future<void> _handleStreamDone(WorkoutPlan? plan, {String? backendMessageId}) async {
     _throttleTimer?.cancel();
     _streamStatus = ChatStreamStatus.completed;
 
@@ -769,6 +769,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           workoutPlanJson: plan?.toJson(),
         ),
       );
+
+      // 关键：如果后端返回了消息ID，更新为后端ID
+      if (backendMessageId != null) {
+        _updateMessageId(backendMessageId);
+      }
     }
 
     // 保存到本地（用户数据隔离）
@@ -776,6 +781,25 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       final userId = await UserDataHelper.getCurrentUserId();
       if (userId != null && userId.isNotEmpty) {
         await _localService.saveMessage(_messages.last);
+
+        // 同时保存 agent_outputs 到后端
+        final lastMessage = _messages.last;
+        if (lastMessage.agentOutputs != null &&
+            lastMessage.agentOutputs!.isNotEmpty &&
+            _currentSessionId != null) {
+          try {
+            // 使用后端返回的消息ID（优先）或当前消息ID
+            final messageId = backendMessageId ?? lastMessage.id;
+            await _sessionApiService.updateMessageAgentOutputs(
+              _currentSessionId!,
+              messageId,
+              lastMessage.agentOutputs!.map((e) => e.toJson()).toList(),
+            );
+            debugPrint('[ChatProvider] 成功保存 agent_outputs 到后端，消息ID: $messageId');
+          } catch (e) {
+            debugPrint('[ChatProvider] 保存 agent_outputs 到后端失败: $e');
+          }
+        }
       }
     }
 
@@ -875,6 +899,32 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       );
       if (index != -1) {
         _messages[index] = newMessage;
+      }
+    }
+  }
+
+  /// 更新当前流式消息的ID（用于同步后端UUID）
+  void _updateMessageId(String newId) {
+    if (_streamingMessageId != null) {
+      final index = _messages.indexWhere(
+        (msg) => msg.id == _streamingMessageId,
+      );
+      if (index != -1) {
+        final oldMessage = _messages[index];
+        // 创建新消息对象，使用新的ID但保留其他所有字段
+        _messages[index] = ChatMessage(
+          id: newId,  // 新的后端ID
+          type: oldMessage.type,
+          content: oldMessage.content,
+          timestamp: oldMessage.timestamp,
+          structuredData: oldMessage.structuredData,
+          dataType: oldMessage.dataType,
+          sessionId: oldMessage.sessionId,
+          agentOutputs: oldMessage.agentOutputs,
+        );
+        // 更新流式消息ID跟踪
+        _streamingMessageId = newId;
+        debugPrint('[ChatProvider] 消息ID已更新为后端UUID: $newId');
       }
     }
   }

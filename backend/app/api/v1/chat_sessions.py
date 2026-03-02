@@ -1,7 +1,7 @@
 """聊天会话 API 端点"""
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from app.db.session import get_db
 from app.core.deps import get_current_user
@@ -19,6 +19,12 @@ from pydantic import BaseModel
 class GenerateTitleRequest(BaseModel):
     """生成标题请求"""
     first_message: str
+
+
+class UpdateAgentOutputsRequest(BaseModel):
+    """更新消息 Agent 输出请求"""
+    agent_outputs: List[Any]
+
 
 router = APIRouter(prefix="/chat-sessions", tags=["聊天会话"])
 
@@ -132,6 +138,7 @@ async def get_session_messages(
             content=m.content,
             structured_data=m.structured_data,
             data_type=m.data_type,
+            agent_outputs=m.agent_outputs,
             created_at=m.created_at,
         )
         for m in messages
@@ -301,4 +308,68 @@ async def generate_session_title(
         message_count=session.message_count,
         created_at=session.created_at,
         updated_at=session.updated_at,
+    )
+
+
+@router.patch("/{session_id}/messages/{message_id}/agent-outputs", response_model=ChatMessageSchema)
+async def update_message_agent_outputs(
+    session_id: str,
+    message_id: str,
+    request: UpdateAgentOutputsRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    更新消息的 Agent 输出
+
+    在流式完成后，前端将 Agent 执行结果保存到消息中
+
+    Args:
+        session_id: 会话ID
+        message_id: 消息ID
+        request: 包含 agent_outputs 的请求
+
+    Returns:
+        ChatMessageSchema: 更新后的消息
+    """
+    from sqlalchemy import select
+    from app.models.chat_session import ChatMessage
+
+    # 验证会话归属
+    chat_service = ChatService(db)
+    session = await chat_service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    # 获取消息
+    result = await db.execute(
+        select(ChatMessage).where(
+            ChatMessage.id == message_id,
+            ChatMessage.session_id == session_id
+        )
+    )
+    message = result.scalar_one_or_none()
+
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="消息不存在"
+        )
+
+    # 更新 agent_outputs
+    message.agent_outputs = request.agent_outputs
+    await db.commit()
+    await db.refresh(message)
+
+    return ChatMessageSchema(
+        id=str(message.id),
+        role=message.role,
+        content=message.content,
+        structured_data=message.structured_data,
+        data_type=message.data_type,
+        agent_outputs=message.agent_outputs,
+        created_at=message.created_at,
     )
