@@ -22,7 +22,11 @@
       "Bash(flutter clean:*)",
       "Bash(del \"d:\\\\FlutterProjects\\\\micofit\\\\lib\\\\widgets\\\\limitations_3d_viewer.dart\")",
       "Bash(alembic current:*)",
-      "Bash(/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -Command \"python -c \"\"import ast; ast.parse\\(open\\(''app/agents/prompts.py''\\).read\\(\\)\\); print\\(''prompts.py OK''\\)\"\" 2\\\\u0026\\\\u003e1\")"
+      "Bash(/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -Command \"python -c \"\"import ast; ast.parse\\(open\\(''app/agents/prompts.py''\\).read\\(\\)\\); print\\(''prompts.py OK''\\)\"\" 2\\\\u0026\\\\u003e1\")",
+      "Bash(conda activate python3.12)",
+      "Bash(python -m py_compile backend/app/agents/models.py backend/app/agents/shared_context.py backend/app/agents/task_executor.py backend/app/agents/planner_agent.py)",
+      "Bash(python -m py_compile backend/app/agents/task_executor.py)",
+      "Bash(python -m py_compile backend/app/agents/planner_agent.py)"
     ]
   }
 }

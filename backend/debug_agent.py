@@ -136,26 +136,22 @@ def interactive_mode():
     # 使用全局测试数据
     global TEST_USER_PROFILE, TEST_HISTORY
 
-    while True:
+    try:
+        user_input = "定制2个训练计划，一个是训练腹肌，一个是训练肩膀"
+
+
         try:
-            user_input = "定制2个训练计划，一个是训练腹肌，一个是训练肩膀"
-
-            if not user_input:
-                continue
-            else:
-                try:
-                    asyncio.run(run_agent_test(user_input))
-                except Exception as e:
-                    import traceback
-                    traceback.print_exc()
-
-        except KeyboardInterrupt:
-            print("\n\n退出程序")
-            break
+            asyncio.run(run_agent_test(user_input))
         except Exception as e:
             import traceback
-            print(f"\n错误: {e}")
             traceback.print_exc()
+
+    except KeyboardInterrupt:
+        print("\n\n退出程序")
+    except Exception as e:
+        import traceback
+        print(f"\n错误: {e}")
+        traceback.print_exc()
 
 
 def main():

@@ -1,14 +1,17 @@
 """TaskExecutor - 任务执行器
 
 按计划执行任务，协调 SubAgent，处理任务依赖。
+支持串行和并行两种执行模式。
 """
+import asyncio
 import logging
 from typing import Any, AsyncGenerator
 
 from app.agents.models import (
     Task,
     TaskStatus,
-    ExecutionPlan
+    ExecutionPlan,
+    ExecutionMode
 )
 from app.agents.shared_context import SharedContextPool
 
@@ -113,6 +116,196 @@ class TaskExecutor:
 
         # 返回所有任务
         return list(task_map.values())
+
+    async def execute_parallel(
+        self,
+        plan: ExecutionPlan,
+        context: SharedContextPool,
+        user_id: str,
+        session_id: str,
+        user_message: str,
+        user_profile: dict | None = None,
+        history: list[dict] | None = None,
+        context_summary: str | None = None,
+        recent_memories: list[str] | None = None
+    ) -> AsyncGenerator[dict, None]:
+        """
+        并行执行任务
+
+        按照 parallel_groups 分批执行，同批次内并行执行，批次间串行执行。
+
+        Args:
+            plan: 执行计划
+            context: 共享上下文
+            user_id: 用户ID
+            session_id: 会话ID
+            user_message: 用户消息
+            user_profile: 用户画像
+            history: 历史消息
+            context_summary: 会话摘要
+            recent_memories: 跨会话记忆
+
+        Yields:
+            dict: 流式响应块
+            - {"type": "batch_start", "batch_index": int, "tasks": [...]}
+            - {"type": "batch_complete", "batch_index": int}
+            - {"type": "task_error", "task_id": str, "error": str}
+            - 各任务产生的 chunks
+        """
+        tasks = plan.get("tasks", [])
+        parallel_groups = plan.get("parallel_groups", [])
+
+        if not parallel_groups:
+            logger.warning("没有并行组信息，回退到串行执行")
+            completed_tasks = await self.execute(
+                plan=plan,
+                context=context,
+                user_id=user_id,
+                session_id=session_id,
+                user_message=user_message,
+                user_profile=user_profile,
+                history=history,
+                context_summary=context_summary,
+                recent_memories=recent_memories
+            )
+            # 串行执行后，yield 所有任务的 chunks
+            for task in completed_tasks:
+                output_data = task.get("output_data", {})
+                for chunk in output_data.get("chunks", []):
+                    yield chunk
+            return
+
+        task_map = {task["id"]: task for task in tasks}
+
+        # 按批次执行
+        for batch_idx, batch_task_ids in enumerate(parallel_groups):
+            # 通知批次开始
+            yield {
+                "type": "batch_start",
+                "batch_index": batch_idx,
+                "total_batches": len(parallel_groups),
+                "tasks": batch_task_ids
+            }
+
+            # 获取本批次需要执行的任务
+            tasks_in_batch = [
+                task_map[tid] for tid in batch_task_ids
+                if tid in task_map
+            ]
+
+            if not tasks_in_batch:
+                logger.warning(f"批次 {batch_idx} 没有有效任务")
+                continue
+
+            logger.info(f"批次 {batch_idx}: 并行执行 {len(tasks_in_batch)} 个任务: {[t['id'] for t in tasks_in_batch]}")
+
+            # 创建并行执行的任务
+            coroutines = [
+                self._execute_single_task(
+                    task=task,
+                    context=context,
+                    user_id=user_id,
+                    session_id=session_id,
+                    original_message=user_message,
+                    user_profile=user_profile,
+                    history=history,
+                    context_summary=context_summary,
+                    recent_memories=recent_memories
+                )
+                for task in tasks_in_batch
+            ]
+
+            # 并行执行并等待所有任务完成
+            batch_timeout = len(tasks_in_batch) * 60.0  # 每个任务60秒
+            try:
+                batch_results = await asyncio.wait_for(
+                    asyncio.gather(*coroutines, return_exceptions=True),
+                    timeout=batch_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"批次 {batch_idx} 执行超时")
+                batch_results = [TimeoutError(f"批次 {batch_idx} 超时")] * len(tasks_in_batch)
+
+            # 处理批次结果
+            for task, result in zip(tasks_in_batch, batch_results):
+                task_id = task["id"]
+
+                if isinstance(result, Exception):
+                    # 任务执行失败
+                    logger.error(f"任务 {task_id} 执行失败: {result}")
+                    task["status"] = TaskStatus.FAILED
+                    task["error"] = str(result)
+                    yield {
+                        "type": "task_error",
+                        "task_id": task_id,
+                        "error": str(result)
+                    }
+                else:
+                    # 任务执行成功
+                    task["status"] = TaskStatus.COMPLETED
+                    task["output_data"] = result.get("output_data", {})
+
+                    # 输出该任务的所有 chunks（带 task_id 标记）
+                    for chunk in result.get("chunks", []):
+                        if isinstance(chunk, dict):
+                            # 添加任务ID以便前端区分
+                            chunk_with_id = chunk.copy()
+                            chunk_with_id["task_id"] = task_id
+                            yield chunk_with_id
+
+            # 通知批次完成
+            yield {
+                "type": "batch_complete",
+                "batch_index": batch_idx,
+                "completed_tasks": batch_task_ids
+            }
+
+            logger.info(f"批次 {batch_idx} 执行完成")
+
+    async def _execute_single_task(
+        self,
+        task: Task,
+        context: SharedContextPool,
+        user_id: str,
+        session_id: str,
+        original_message: str,
+        user_profile: dict | None = None,
+        history: list[dict] | None = None,
+        context_summary: str | None = None,
+        recent_memories: list[str] | None = None
+    ) -> dict:
+        """
+        执行单个任务并收集所有输出
+
+        与 _execute_task 的区别：此方法收集所有流式输出后返回完整结果，
+        而不是实时 yield。适用于并行执行场景。
+
+        Returns:
+            dict: 包含 chunks 和 output_data 的结果字典
+        """
+        chunks = []
+
+        async for item in self._execute_task(
+            task=task,
+            context=context,
+            user_id=user_id,
+            session_id=session_id,
+            original_message=original_message,
+            user_profile=user_profile,
+            history=history,
+            context_summary=context_summary,
+            recent_memories=recent_memories
+        ):
+            # 过滤掉 Task 对象，只收集 dict chunks
+            if isinstance(item, dict) and not isinstance(item.get("output_data"), dict):
+                chunks.append(item)
+
+        return {
+            "task_id": task["id"],
+            "status": task["status"],
+            "chunks": chunks,
+            "output_data": task.get("output_data", {})
+        }
 
     async def _execute_task(
         self,

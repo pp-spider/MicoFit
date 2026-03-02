@@ -24,6 +24,13 @@ class TaskType(str, Enum):
     ANALYSIS = "analysis"
 
 
+class ExecutionMode(str, Enum):
+    """任务执行模式"""
+    SERIAL = "serial"          # 纯串行执行
+    PARALLEL = "parallel"      # 纯并行执行（按组）
+    AUTO = "auto"              # 自动选择（默认）
+
+
 class Task(TypedDict):
     """任务定义"""
     id: str
@@ -43,6 +50,8 @@ class ExecutionPlan(TypedDict):
     execution_order: list[str]
     requires_collaboration: bool
     parallel_groups: list[list[str]]
+    execution_mode: ExecutionMode | None  # 执行模式
+    estimated_duration_ms: int | None     # 预估执行时间（毫秒）
 
 
 class TaskAnalysis(TypedDict):

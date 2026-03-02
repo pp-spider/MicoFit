@@ -111,6 +111,44 @@ class SharedContextPool:
         except asyncio.TimeoutError:
             return None
 
+    async def wait_all_tasks_complete(
+        self,
+        task_ids: list[str],
+        timeout: float = 30.0
+    ) -> dict[str, Any]:
+        """
+        等待多个任务完成
+
+        Args:
+            task_ids: 任务ID列表
+            timeout: 每个任务的超时时间（秒）
+
+        Returns:
+            dict[str, Any]: 任务ID到结果的映射
+        """
+        tasks = [self.wait_task_complete(tid, timeout) for tid in task_ids]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return dict(zip(task_ids, results))
+
+    def get_tasks_status(self, task_ids: list[str]) -> dict[str, str]:
+        """
+        批量获取任务状态
+
+        Args:
+            task_ids: 任务ID列表
+
+        Returns:
+            dict[str, str]: 任务ID到状态的映射
+        """
+        status_map = {}
+        for tid in task_ids:
+            result = self.get_task_result(tid)
+            if result is None:
+                status_map[tid] = "pending"
+            else:
+                status_map[tid] = "completed"
+        return status_map
+
     def clear(self) -> None:
         """清空上下文"""
         self._data.clear()

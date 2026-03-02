@@ -18,7 +18,7 @@ from app.agents.shared_context import SharedContextPool
 from app.agents.result_aggregator import ResultAggregator
 from app.agents.chat_sub_agent import ChatSubAgent
 from app.agents.workout_sub_agent import WorkoutSubAgent
-from app.agents.models import ExecutionPlan, TaskAnalysis
+from app.agents.models import ExecutionPlan, TaskAnalysis, ExecutionMode
 
 logger = logging.getLogger(__name__)
 
@@ -159,61 +159,128 @@ class PlannerAgent:
             all_chunks = []
             final_plan = None
 
-            # 遍历执行任务并实时流式 yield 到前端
-            for task_id in execution_plan.get("execution_order", []):
-                # 找到对应的任务
-                task = None
-                for t in execution_plan.get("tasks", []):
-                    if t.get("id") == task_id:
-                        task = t
-                        break
+            # 判断执行模式：根据 parallel_groups 是否有实际并行组
+            parallel_groups = execution_plan.get("parallel_groups", [])
+            execution_mode = execution_plan.get("execution_mode", ExecutionMode.AUTO)
 
-                if not task:
-                    continue
+            # 判断是否真的有并行执行的必要（存在长度>1的组）
+            has_parallel_groups = any(len(g) > 1 for g in parallel_groups)
 
-                logger.info(f"执行任务: {task_id}, 类型: {task.get('type')}, Agent: {task.get('agent_name')}")
+            # 强制串行模式开关（可通过环境变量或配置控制）
+            force_serial = False  # 未来可从配置读取
 
-                # 使用 async for 实时获取 chunks 并 yield 到前端
-                async for result in self.task_executor._execute_task(
-                    task=task,
+            should_use_parallel = (
+                not force_serial and
+                execution_mode != ExecutionMode.SERIAL and
+                has_parallel_groups
+            )
+
+            if should_use_parallel:
+                # ========== 并行执行模式 ==========
+                logger.info(f"使用并行执行模式，共 {len(parallel_groups)} 个批次")
+                print(f"\n🚀 使用并行执行模式，{len(parallel_groups)} 个批次\n")
+
+                async for result in self.task_executor.execute_parallel(
+                    plan=execution_plan,
                     context=context,
                     user_id=user_id,
                     session_id=session_id,
-                    original_message=user_message,
+                    user_message=user_message,
                     user_profile=user_profile,
                     history=history,
                     context_summary=context_summary,
                     recent_memories=recent_memories
                 ):
-                    # 检查是否是 Task 对象（最后一个 yield）
-                    if isinstance(result, dict) and result.get("output_data"):
-                        # 这是任务完成后返回的 Task 对象
-                        executed_task = result
-                        output_data = executed_task.get("output_data", {})
-                        task_chunks = output_data.get("chunks", [])
-                        all_chunks.extend(task_chunks)
-                        logger.info(f"任务 {task_id} 执行完成，共 {len(task_chunks)} 个 chunks")
+                    result_type = result.get("type")
 
-                        # 提取 plan
-                        if output_data.get("plan"):
-                            final_plan = output_data.get("plan")
-                    else:
-                        # 这是一个 chunk，实时 yield 到前端
-                        chunk = result
+                    if result_type == "batch_start":
+                        print(f"\n📦 批次 {result.get('batch_index') + 1}/{result.get('total_batches')} 开始: {result.get('tasks')}")
+                        yield result
 
-                        # 跳过 SubAgent 内部的 done 事件（不是整个 Planner 的结束）
-                        if chunk.get("type") == "done":
-                            logger.info(f"跳过 SubAgent 内部 done，任务继续执行...")
+                    elif result_type == "batch_complete":
+                        print(f"✅ 批次 {result.get('batch_index') + 1} 完成")
+                        yield result
+
+                    elif result_type == "task_error":
+                        logger.error(f"任务 {result.get('task_id')} 失败: {result.get('error')}")
+                        yield result
+
+                    elif result_type in ("chunk", "plan", "agent_status"):
+                        # 收集chunks用于结果聚合
+                        if result_type == "chunk":
+                            all_chunks.append(result)
+                        elif result_type == "plan":
+                            final_plan = result.get("plan")
+                            all_chunks.append(result)
+
+                        # 跳过子Agent内部的done事件
+                        if result_type == "done":
                             continue
 
-                        # 记录 AI 返回的内容
-                        if chunk.get("type") == "chunk" and chunk.get("content"):
-                            logger.info(f"AI 返回内容: {chunk.get('content')[:200]}...")
-                        elif chunk.get("type") == "plan":
-                            logger.info(f"AI 返回计划: {chunk.get('plan', {}).get('title', '无标题')}")
-
                         # 实时 yield 到前端
-                        yield chunk
+                        yield result
+
+                print(f"\n✅ 并行执行完成\n")
+
+            else:
+                # ========== 串行执行模式（默认/向后兼容） ==========
+                logger.info("使用串行执行模式")
+
+                # 遍历执行任务并实时流式 yield 到前端
+                for task_id in execution_plan.get("execution_order", []):
+                    # 找到对应的任务
+                    task = None
+                    for t in execution_plan.get("tasks", []):
+                        if t.get("id") == task_id:
+                            task = t
+                            break
+
+                    if not task:
+                        continue
+
+                    logger.info(f"执行任务: {task_id}, 类型: {task.get('type')}, Agent: {task.get('agent_name')}")
+
+                    # 使用 async for 实时获取 chunks 并 yield 到前端
+                    async for result in self.task_executor._execute_task(
+                        task=task,
+                        context=context,
+                        user_id=user_id,
+                        session_id=session_id,
+                        original_message=user_message,
+                        user_profile=user_profile,
+                        history=history,
+                        context_summary=context_summary,
+                        recent_memories=recent_memories
+                    ):
+                        # 检查是否是 Task 对象（最后一个 yield）
+                        if isinstance(result, dict) and result.get("output_data"):
+                            # 这是任务完成后返回的 Task 对象
+                            executed_task = result
+                            output_data = executed_task.get("output_data", {})
+                            task_chunks = output_data.get("chunks", [])
+                            all_chunks.extend(task_chunks)
+                            logger.info(f"任务 {task_id} 执行完成，共 {len(task_chunks)} 个 chunks")
+
+                            # 提取 plan
+                            if output_data.get("plan"):
+                                final_plan = output_data.get("plan")
+                        else:
+                            # 这是一个 chunk，实时 yield 到前端
+                            chunk = result
+
+                            # 跳过 SubAgent 内部的 done 事件（不是整个 Planner 的结束）
+                            if chunk.get("type") == "done":
+                                logger.info(f"跳过 SubAgent 内部 done，任务继续执行...")
+                                continue
+
+                            # 记录 AI 返回的内容
+                            if chunk.get("type") == "chunk" and chunk.get("content"):
+                                logger.info(f"AI 返回内容: {chunk.get('content')[:200]}...")
+                            elif chunk.get("type") == "plan":
+                                logger.info(f"AI 返回计划: {chunk.get('plan', {}).get('title', '无标题')}")
+
+                            # 实时 yield 到前端
+                            yield chunk
 
             # ========== 步骤4: 结果聚合 ==========
             print("─"*50)
