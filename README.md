@@ -26,12 +26,12 @@
     <tr>
       <td align="center"><b>多 Agent 协作</b></td>
       <td align="center"><b>训练计划UI</b></td>
-      <td></td>
+      <td align="center"><b>个人中心</b></td>
     </tr>
     <tr>
       <td><img src="img/4.jpg" width="200" alt="多 Agent 协作"/></td>
       <td><img src="img/5.jpg" width="200" alt="动作详情"/></td>
-      <td></td>
+      <td><img src="img/6.jpg" width="200" alt="个人中心"/></td>
     </tr>
   </table>
 </div>
