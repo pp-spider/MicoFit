@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/feedback.dart';
+import '../services/record_local_service.dart';
+import '../services/workout_api_service.dart';
+import '../constants/body_regions.dart';
 
 /// 训练反馈页面
 class FeedbackPage extends StatefulWidget {
@@ -21,6 +24,9 @@ class _FeedbackPageState extends State<FeedbackPage>
   CompletionLevel? _completion;
   FeelingLevel? _feeling;
   TomorrowPreference? _tomorrow;
+
+  // 疼痛部位选择
+  final List<String> _selectedPainLocations = [];
 
   bool _showAIResponse = false;
   String _aiText = '';
@@ -52,8 +58,42 @@ class _FeedbackPageState extends State<FeedbackPage>
   bool get _allAnswered =>
       _completion != null && _feeling != null && _tomorrow != null;
 
-  void _handleSubmit() {
+  void _handleSubmit() async {
     if (!_allAnswered) return;
+
+    // 保存反馈到本地
+    final feedback = WorkoutFeedback(
+      completion: _completion!,
+      feeling: _feeling!,
+      tomorrow: _tomorrow!,
+      painLocations: _selectedPainLocations,
+    );
+
+    try {
+      final recordService = RecordLocalService();
+      recordService.saveFeedback(
+        date: DateTime.now(),
+        feedback: feedback,
+        duration: widget.workoutDuration,
+      );
+    } catch (e) {
+      debugPrint('保存反馈到本地失败: $e');
+    }
+
+    // 同时提交反馈到后端
+    try {
+      final apiService = WorkoutApiService();
+      await apiService.submitFeedback(
+        duration: widget.workoutDuration,
+        completion: _completion!,
+        feeling: _feeling!,
+        tomorrow: _tomorrow!,
+        painLocations: _selectedPainLocations,
+      );
+    } catch (e) {
+      debugPrint('提交反馈到后端失败: $e');
+      // 后端失败不阻止UI继续，因为已经保存到本地
+    }
 
     setState(() {
       _showAIResponse = true;
@@ -186,6 +226,12 @@ class _FeedbackPageState extends State<FeedbackPage>
           isGrid: true,
         ),
 
+        // 疼痛部位选择器（仅当选择"某部位不适"时显示）
+        if (_feeling == FeelingLevel.uncomfortable) ...[
+          const SizedBox(height: 32),
+          _buildPainLocationSelector(),
+        ],
+
         const SizedBox(height: 32),
 
         // Tomorrow
@@ -293,7 +339,7 @@ class _FeedbackPageState extends State<FeedbackPage>
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -368,6 +414,68 @@ class _FeedbackPageState extends State<FeedbackPage>
     return Column(children: rows);
   }
 
+  Widget _buildPainLocationSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 24,
+              height: 24,
+              decoration: const BoxDecoration(
+                color: Color(0xFFEF4444),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.warning,
+                size: 14,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              '哪个部位不适？（可多选）',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF115E59),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: PAIN_LOCATION_OPTIONS.map((option) {
+            final value = option['value']!;
+            final isSelected = _selectedPainLocations.contains(value);
+            return FilterChip(
+              label: Text(option['label']!),
+              selected: isSelected,
+              onSelected: (selected) {
+                setState(() {
+                  if (selected) {
+                    _selectedPainLocations.add(value);
+                  } else {
+                    _selectedPainLocations.remove(value);
+                  }
+                });
+              },
+              selectedColor: const Color(0xFFEF4444).withValues(alpha: 0.2),
+              checkmarkColor: const Color(0xFFEF4444),
+              backgroundColor: Colors.white,
+              side: BorderSide(
+                color: isSelected ? const Color(0xFFEF4444) : Colors.grey[300]!,
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
   Widget _buildFullWidthOptionButton<T extends Enum>({
     required T option,
     required bool isSelected,
@@ -395,7 +503,7 @@ class _FeedbackPageState extends State<FeedbackPage>
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -521,7 +629,7 @@ class _FeedbackPageState extends State<FeedbackPage>
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -589,7 +697,7 @@ class _FeedbackPageState extends State<FeedbackPage>
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            const Color(0xFFF5F5F0).withOpacity(0),
+            const Color(0xFFF5F5F0).withValues(alpha: 0),
             const Color(0xFFF5F5F0),
           ],
         ),

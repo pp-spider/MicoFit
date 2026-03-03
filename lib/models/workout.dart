@@ -45,6 +45,9 @@ class WorkoutPlan {
   final int rpe; // 运动强度 1-10
   final List<WorkoutModule> modules;
   final String? aiNote;
+  final bool isCompleted;
+  final bool isApplied;
+  final DateTime? planDate;
 
   WorkoutPlan({
     required this.id,
@@ -55,9 +58,25 @@ class WorkoutPlan {
     required this.rpe,
     required this.modules,
     this.aiNote,
+    this.isCompleted = false,
+    this.isApplied = false,
+    this.planDate,
   });
 
   factory WorkoutPlan.fromJson(Map<String, dynamic> json) {
+    DateTime? parsePlanDate(dynamic val) {
+      if (val == null) return null;
+      if (val is DateTime) return val;
+      if (val is String) {
+        try {
+          return DateTime.parse(val);
+        } catch (_) {
+          return null;
+        }
+      }
+      return null;
+    }
+
     return WorkoutPlan(
       id: json['id'] as String,
       title: json['title'] as String,
@@ -65,10 +84,13 @@ class WorkoutPlan {
       totalDuration: json['total_duration'] as int? ?? json['totalDuration'] as int? ?? 12,
       scene: json['scene'] as String,
       rpe: json['rpe'] as int,
-      modules: (json['modules'] as List)
-          .map((e) => WorkoutModule.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      modules: (json['modules'] as List?)
+          ?.map((e) => WorkoutModule.fromJson(e as Map<String, dynamic>))
+          .toList() ?? [],
       aiNote: json['ai_note'] as String? ?? json['aiNote'] as String?,
+      isCompleted: json['is_completed'] as bool? ?? false,
+      isApplied: json['is_applied'] as bool? ?? false,
+      planDate: parsePlanDate(json['plan_date']),
     );
   }
 
@@ -82,6 +104,9 @@ class WorkoutPlan {
       'rpe': rpe,
       'modules': modules.map((e) => e.toJson()).toList(),
       'aiNote': aiNote,
+      'isCompleted': isCompleted,
+      'isApplied': isApplied,
+      'planDate': planDate?.toIso8601String(),
     };
   }
 }

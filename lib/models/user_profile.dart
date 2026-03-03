@@ -13,6 +13,7 @@ class UserProfile {
   final String goal;
   final int weeklyDays;
   final List<String> preferredTime;
+  final String? avatarUrl; // 头像URL（本地存储路径或网络URL）
   final DateTime? createdAt; // 创建时间
   final DateTime? updatedAt; // 更新时间
 
@@ -30,6 +31,7 @@ class UserProfile {
     required this.goal,
     required this.weeklyDays,
     required this.preferredTime,
+    this.avatarUrl,
     this.createdAt,
     this.updatedAt,
   });
@@ -58,6 +60,7 @@ class UserProfile {
       preferredTime: List<String>.from(
         json['preferred_time'] as List? ?? json['preferredTime'] as List? ?? [],
       ),
+      avatarUrl: json['avatar_url'] as String? ?? json['avatarUrl'] as String?,
       createdAt: _parseDateTime(json['created_at'] ?? json['createdAt']),
       updatedAt: _parseDateTime(json['updated_at'] ?? json['updatedAt']),
     );
@@ -78,6 +81,7 @@ class UserProfile {
       'goal': goal,
       'weekly_days': weeklyDays, // 后端使用蛇形命名
       'preferred_time': preferredTime, // 后端使用蛇形命名
+      if (avatarUrl != null) 'avatar_url': avatarUrl,
       if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
       if (updatedAt != null) 'updated_at': updatedAt!.toIso8601String(),
     };

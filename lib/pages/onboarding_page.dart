@@ -928,7 +928,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   activeTrackColor: const Color(0xFF2DD4BF),
                   inactiveTrackColor: const Color(0xFFE5E7EB),
                   thumbColor: const Color(0xFF2DD4BF),
-                  overlayColor: const Color(0xFF2DD4BF).withOpacity(0.2),
+                  overlayColor: const Color(0xFF2DD4BF).withValues(alpha: 0.2),
                 ),
                 child: Slider(
                   value: _weeklyDays.toDouble(),
@@ -1205,7 +1205,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                     borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
+                        color: Colors.black.withValues(alpha: 0.05),
                         blurRadius: 12,
                       ),
                     ],
@@ -1309,7 +1309,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            const Color(0xFFF5F5F0).withOpacity(0),
+            const Color(0xFFF5F5F0).withValues(alpha: 0),
             const Color(0xFFF5F5F0),
           ],
         ),

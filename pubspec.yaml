@@ -37,15 +37,35 @@ dependencies:
 
   # Local storage
   shared_preferences: ^2.2.2
+  flutter_secure_storage: ^9.2.2
 
-  # HTTP 请求
-  http: ^1.2.0
+  # 网络状态检测
+  connectivity_plus: ^6.0.0
 
   # 状态管理
   provider: ^6.1.1
 
-  # 网络状态检测
-  connectivity_plus: ^5.0.2
+  # AI 服务
+  dart_openai: ^6.1.1
+  http: ^1.2.0
+
+  # 图片选择
+  image_picker: ^1.0.7
+
+  # Markdown 渲染
+  flutter_markdown: ^0.7.4+3
+
+  # 图表库
+  fl_chart: ^0.68.0
+
+  # 分享功能
+  share_plus: ^7.2.0
+  screenshot: ^2.1.0
+  path_provider: ^2.1.0
+
+  # 3D模型渲染 (使用 2D Canvas 实现)
+  # three_js: ^0.1.7
+  # vector_math: ^2.1.4
 
 dev_dependencies:
   flutter_test:
@@ -57,6 +77,9 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
+  # 应用图标生成工具
+  flutter_launcher_icons: ^0.14.3
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -98,3 +121,22 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# 应用图标配置
+# 运行 flutter pub get 安装依赖
+# 然后运行 flutter pub run flutter_launcher_icons:main 生成图标
+flutter_icons:
+  android: true
+  ios: true
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+  image_path: "assets/icon/app_icon.png"
+  # Android 自适应图标配置（可选）
+  # 如果需要，创建 assets/icon/app_icon_foreground.png 后取消注释
+  # adaptive_icon_background: "#2DD4BF"
+  # adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"

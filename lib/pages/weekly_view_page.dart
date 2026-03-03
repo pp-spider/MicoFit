@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/weekly_data.dart';
 import '../widgets/bottom_nav.dart';
+import '../providers/monthly_stats_provider.dart';
 
 /// 打卡记录页面 - 月度视图
 class WeeklyViewPage extends StatefulWidget {
@@ -68,11 +70,6 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
 
                     const SizedBox(height: 24),
 
-                    // AI Insight
-                    _buildAIInsight(),
-
-                    const SizedBox(height: 24),
-
                     // Day Detail (if selected)
                     if (selectedDayIndex != null &&
                         _monthlyData.records[selectedDayIndex!].duration >
@@ -113,17 +110,55 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
           ),
           Row(
             children: [
-              Icon(Icons.calendar_today, size: 16, color: Colors.grey[600]),
-              const SizedBox(width: 6),
-              Text(
-                '${_monthlyData.year}年${_monthlyData.month}月',
-                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+              // 训练报告入口
+              IconButton(
+                onPressed: () => widget.onNavigate('training_report'),
+                icon: const Icon(Icons.bar_chart, color: Color(0xFF2DD4BF)),
+                tooltip: '训练报告',
+              ),
+              const SizedBox(width: 4),
+              // 可点击的日期选择器
+              InkWell(
+                onTap: () => _showDatePicker(),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today, size: 16, color: Colors.grey[600]),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${_monthlyData.year}年${_monthlyData.month}月',
+                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.arrow_drop_down, size: 16, color: Colors.grey[600]),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  /// 显示年月选择器
+  Future<void> _showDatePicker() async {
+    // 使用自定义的年月选择器
+    final DateTime? selectedDate = await showDialog<DateTime>(
+      context: context,
+      builder: (context) => _YearMonthPickerDialog(
+        initialDate: DateTime(_monthlyData.year, _monthlyData.month),
+      ),
+    );
+
+    if (selectedDate != null) {
+      // 加载选择月份的统计数据
+      final provider = context.read<MonthlyStatsProvider>();
+      await provider.loadMonthlyStats(selectedDate.year, selectedDate.month);
+    }
   }
 
   Widget _buildMonthCalendar() {
@@ -138,7 +173,7 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -237,8 +272,8 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
                   margin: const EdgeInsets.all(2),
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? const Color(0xFF2DD4BF).withOpacity(0.1)
-                        : (isToday ? const Color(0xFF2DD4BF).withOpacity(0.05) : Colors.transparent),
+                        ? const Color(0xFF2DD4BF).withValues(alpha: 0.1)
+                        : (isToday ? const Color(0xFF2DD4BF).withValues(alpha: 0.05) : Colors.transparent),
                     borderRadius: BorderRadius.circular(8),
                     border: isToday
                         ? Border.all(color: const Color(0xFF2DD4BF), width: 1.5)
@@ -325,7 +360,7 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -502,73 +537,6 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
     );
   }
 
-  Widget _buildAIInsight() {
-    // final completionRate = (_monthlyData.completedDays / _monthlyData.daysInMonth * 100).toInt();
-    final today = DateTime.now();
-    final isCurrentMonth = today.year == _monthlyData.year && today.month == _monthlyData.month;
-    final remainingDays = _monthlyData.daysInMonth - today.day;
-
-    String insightText;
-    if (!isCurrentMonth) {
-      insightText = '${_monthlyData.month}月共完成${_monthlyData.completedDays}天训练，累计${_monthlyData.totalMinutes}分钟。';
-    } else if (remainingDays > 0) {
-      insightText = '本月还剩$remainingDays天，按当前进度预计可完成${_monthlyData.completedDays + remainingDays ~/ 2}天训练。';
-    } else {
-      insightText = '本月打卡完成！已完成${_monthlyData.completedDays}天训练，累计${_monthlyData.totalMinutes}分钟。';
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF7ED),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFFED7AA)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: const BoxDecoration(
-              color: Color(0xFF8B5CF6),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.lightbulb,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'AI洞察',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF5B21B6),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  insightText,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[800],
-                    height: 1.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildDayDetail() {
     final record = _monthlyData.records[selectedDayIndex!];
     final dateParts = record.date.split('-');
@@ -582,7 +550,7 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -666,6 +634,187 @@ class _WeeklyViewPageState extends State<WeeklyViewPage>
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 年月选择器对话框
+class _YearMonthPickerDialog extends StatefulWidget {
+  final DateTime initialDate;
+
+  const _YearMonthPickerDialog({required this.initialDate});
+
+  @override
+  State<_YearMonthPickerDialog> createState() => _YearMonthPickerDialogState();
+}
+
+class _YearMonthPickerDialogState extends State<_YearMonthPickerDialog> {
+  late int _selectedYear;
+  late int _selectedMonth;
+  late FixedExtentScrollController _yearController;
+  late FixedExtentScrollController _monthController;
+
+  // 生成年份列表（当前年份前后5年）
+  List<int> get _years {
+    final currentYear = DateTime.now().year;
+    return List.generate(11, (index) => currentYear - 5 + index);
+  }
+
+  // 月份名称
+  List<String> get _monthNames {
+    return ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+  }
+
+  // 获取初始年份索引
+  int _getInitialYearIndex() {
+    final currentYear = DateTime.now().year;
+    return widget.initialDate.year - (currentYear - 5);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedYear = widget.initialDate.year;
+    _selectedMonth = widget.initialDate.month;
+
+    // 初始化控制器并跳转到初始位置
+    _yearController = FixedExtentScrollController(
+      initialItem: _getInitialYearIndex(),
+    );
+    _monthController = FixedExtentScrollController(
+      initialItem: widget.initialDate.month - 1,
+    );
+  }
+
+  @override
+  void dispose() {
+    _yearController.dispose();
+    _monthController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      title: const Text(
+        '选择年月',
+        style: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF115E59),
+        ),
+      ),
+      content: SizedBox(
+        width: 280,
+        height: 200,
+        child: Row(
+          children: [
+            // 年份选择器
+            Expanded(
+              child: Column(
+                children: [
+                  Expanded(
+                    child: ListWheelScrollView(
+                      controller: _yearController,
+                      itemExtent: 50,
+                      diameterRatio: 1.2,
+                      useMagnifier: true,
+                      magnification: 1.1,
+                      onSelectedItemChanged: (index) {
+                        setState(() {
+                          _selectedYear = _years[index];
+                        });
+                      },
+                      children: _years.map((year) {
+                        final isSelected = year == _selectedYear;
+                        return Container(
+                          alignment: Alignment.center,
+                          child: Text(
+                            '$year年',
+                            style: TextStyle(
+                              fontSize: isSelected ? 20 : 16,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                              color: isSelected ? const Color(0xFF115E59) : Colors.grey[400],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            // 月份选择器
+            Expanded(
+              child: Column(
+                children: [
+                  Expanded(
+                    child: ListWheelScrollView(
+                      controller: _monthController,
+                      itemExtent: 50,
+                      diameterRatio: 1.2,
+                      useMagnifier: true,
+                      magnification: 1.1,
+                      onSelectedItemChanged: (index) {
+                        setState(() {
+                          _selectedMonth = index + 1;
+                        });
+                      },
+                      children: _monthNames.asMap().entries.map((entry) {
+                        final month = entry.key + 1;
+                        final isSelected = month == _selectedMonth;
+                        return Container(
+                          alignment: Alignment.center,
+                          child: Text(
+                            entry.value,
+                            style: TextStyle(
+                              fontSize: isSelected ? 20 : 16,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                              color: isSelected ? const Color(0xFF115E59) : Colors.grey[400],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            '取消',
+            style: TextStyle(color: Colors.grey[600]),
+          ),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.of(context).pop(DateTime(_selectedYear, _selectedMonth));
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF2DD4BF),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: const Text(
+            '确定',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

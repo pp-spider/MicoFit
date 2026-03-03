@@ -1,0 +1,537 @@
+"""聊天会话 API 端点"""
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List, Optional, Any
+
+from app.db.session import get_db
+from app.core.deps import get_current_user
+from app.models.user import User
+from app.services.chat_service import ChatService
+from app.schemas.chat import (
+    ChatSessionSchema,
+    ChatMessageSchema,
+    ChatSessionCreateRequest,
+    ChatSessionRenameRequest,
+    ChatGeneratedPlanCreate,
+    ChatGeneratedPlanResponse,
+    ChatGeneratedPlanUpdate,
+)
+from pydantic import BaseModel
+
+
+class GenerateTitleRequest(BaseModel):
+    """生成标题请求"""
+    first_message: str
+
+
+class UpdateAgentOutputsRequest(BaseModel):
+    """更新消息 Agent 输出请求"""
+    agent_outputs: List[Any]
+
+
+router = APIRouter(prefix="/chat-sessions", tags=["聊天会话"])
+
+
+@router.get("", response_model=List[ChatSessionSchema])
+async def get_sessions(
+    limit: int = Query(default=50, ge=1, le=100, description="限制返回数量"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取用户的会话列表（按更新时间倒序）
+
+    Returns:
+        List[ChatSessionSchema]: 会话列表
+    """
+    service = ChatService(db)
+    sessions = await service.get_user_sessions(
+        user_id=str(current_user.id),
+        limit=limit,
+        offset=offset,
+    )
+
+    # 转换为 Schema 格式
+    return [
+        ChatSessionSchema(
+            id=str(s.id),
+            title=s.title,
+            message_count=s.message_count,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+        )
+        for s in sessions
+    ]
+
+
+@router.get("/{session_id}", response_model=ChatSessionSchema)
+async def get_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取单个会话详情
+
+    Args:
+        session_id: 会话ID
+
+    Returns:
+        ChatSessionSchema: 会话详情
+    """
+    service = ChatService(db)
+    session = await service.get_session(session_id)
+
+    # 验证会话属于当前用户
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    return ChatSessionSchema(
+        id=str(session.id),
+        title=session.title,
+        message_count=session.message_count,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
+
+
+@router.get("/{session_id}/messages", response_model=List[ChatMessageSchema])
+async def get_session_messages(
+    session_id: str,
+    limit: int = Query(default=100, ge=1, le=200, description="限制返回数量"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取会话的消息历史
+
+    Args:
+        session_id: 会话ID
+        limit: 限制返回数量
+        offset: 偏移量
+
+    Returns:
+        List[ChatMessageSchema]: 消息列表
+    """
+    service = ChatService(db)
+
+    # 验证会话归属
+    session = await service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    messages = await service.get_session_messages(
+        session_id=session_id,
+        limit=limit,
+        offset=offset,
+    )
+
+    # 构建消息列表，包含关联的计划ID
+    result = []
+    for m in messages:
+        # 获取消息关联的计划ID列表
+        plan_ids = await service.get_message_plan_ids(str(m.id))
+
+        result.append(
+            ChatMessageSchema(
+                id=str(m.id),
+                role=m.role,
+                content=m.content,
+                structured_data=m.structured_data,
+                data_type=m.data_type,
+                agent_outputs=m.agent_outputs,
+                plan_ids=plan_ids if plan_ids else None,
+                created_at=m.created_at,
+            )
+        )
+
+    return result
+
+
+@router.post("", response_model=ChatSessionSchema, status_code=status.HTTP_201_CREATED)
+async def create_session(
+    request: ChatSessionCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    创建新会话
+
+    Args:
+        request: 创建请求，包含可选的标题
+
+    Returns:
+        ChatSessionSchema: 创建的会话
+    """
+    service = ChatService(db)
+    session = await service.create_session(
+        user_id=str(current_user.id),
+        title=request.title or "新对话",
+    )
+
+    return ChatSessionSchema(
+        id=str(session.id),
+        title=session.title,
+        message_count=session.message_count,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
+
+
+@router.patch("/{session_id}", response_model=ChatSessionSchema)
+async def rename_session(
+    session_id: str,
+    request: ChatSessionRenameRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    重命名会话
+
+    Args:
+        session_id: 会话ID
+        request: 重命名请求
+
+    Returns:
+        ChatSessionSchema: 更新后的会话
+    """
+    service = ChatService(db)
+
+    # 验证会话归属
+    session = await service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    updated_session = await service.update_session_title(
+        session_id=session_id,
+        title=request.title,
+    )
+
+    return ChatSessionSchema(
+        id=str(updated_session.id),
+        title=updated_session.title,
+        message_count=updated_session.message_count,
+        created_at=updated_session.created_at,
+        updated_at=updated_session.updated_at,
+    )
+
+
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    删除会话
+
+    Args:
+        session_id: 会话ID
+
+    Returns:
+        204 No Content
+    """
+    service = ChatService(db)
+
+    # 验证会话归属
+    session = await service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    success = await service.delete_session(session_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="删除会话失败"
+        )
+
+    return None
+
+
+@router.post("/{session_id}/generate-title", response_model=ChatSessionSchema)
+async def generate_session_title(
+    session_id: str,
+    request: GenerateTitleRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    基于用户首条消息自动生成会话标题
+
+    Args:
+        session_id: 会话ID
+        request: 生成标题请求，包含用户的第一条消息
+
+    Returns:
+        ChatSessionSchema: 更新后的会话
+    """
+    from app.services.context_service import ContextService
+
+    # 初始化 ChatService
+    service = ChatService(db)
+
+    first_message = request.first_message
+
+    # 验证会话归属
+    session = await service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    # 如果已有标题且不是默认标题，则不覆盖
+    if session.title and session.title != "新对话":
+        return ChatSessionSchema(
+            id=str(session.id),
+            title=session.title,
+            message_count=session.message_count,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+        )
+
+    # 生成新标题
+    context_service = ContextService(db)
+    new_title = await context_service.generate_session_title(session_id, first_message)
+
+    # 更新会话标题
+    session.title = new_title
+    await db.commit()
+    await db.refresh(session)
+
+    return ChatSessionSchema(
+        id=str(session.id),
+        title=session.title,
+        message_count=session.message_count,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
+
+
+@router.patch("/{session_id}/messages/{message_id}/agent-outputs", response_model=ChatMessageSchema)
+async def update_message_agent_outputs(
+    session_id: str,
+    message_id: str,
+    request: UpdateAgentOutputsRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    更新消息的 Agent 输出
+
+    在流式完成后，前端将 Agent 执行结果保存到消息中
+
+    Args:
+        session_id: 会话ID
+        message_id: 消息ID
+        request: 包含 agent_outputs 的请求
+
+    Returns:
+        ChatMessageSchema: 更新后的消息
+    """
+    from sqlalchemy import select
+    from app.models.chat_session import ChatMessage
+
+    # 验证会话归属
+    chat_service = ChatService(db)
+    session = await chat_service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    # 获取消息
+    result = await db.execute(
+        select(ChatMessage).where(
+            ChatMessage.id == message_id,
+            ChatMessage.session_id == session_id
+        )
+    )
+    message = result.scalar_one_or_none()
+
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="消息不存在"
+        )
+
+    # 更新 agent_outputs
+    message.agent_outputs = request.agent_outputs
+    await db.commit()
+    await db.refresh(message)
+
+    return ChatMessageSchema(
+        id=str(message.id),
+        role=message.role,
+        content=message.content,
+        structured_data=message.structured_data,
+        data_type=message.data_type,
+        agent_outputs=message.agent_outputs,
+        created_at=message.created_at,
+    )
+
+
+@router.post("/generated-plans", response_model=ChatGeneratedPlanResponse)
+async def create_generated_plan(
+    data: ChatGeneratedPlanCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    创建生成的训练计划
+
+    在AI流式生成训练计划时调用，将计划持久化到数据库
+
+    Args:
+        data: 计划数据
+
+    Returns:
+        ChatGeneratedPlanResponse: 创建的计划
+    """
+    service = ChatService(db)
+
+    # 验证会话归属
+    session = await service.get_session(data.session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    plan = await service.create_generated_plan(str(current_user.id), data)
+    return plan
+
+
+@router.get("/sessions/{session_id}/generated-plans", response_model=List[ChatGeneratedPlanResponse])
+async def get_session_generated_plans(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取会话中生成的所有计划
+
+    Args:
+        session_id: 会话ID
+
+    Returns:
+        List[ChatGeneratedPlanResponse]: 计划列表
+    """
+    service = ChatService(db)
+
+    # 验证会话归属
+    session = await service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    plans = await service.get_session_generated_plans(str(current_user.id), session_id)
+    return plans
+
+
+@router.put("/generated-plans/{plan_db_id}/response", response_model=ChatGeneratedPlanResponse)
+async def update_generated_plan_response(
+    plan_db_id: str,
+    data: ChatGeneratedPlanUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    更新计划响应状态
+
+    用户确认或拒绝计划时调用。当用户确认计划时，
+    直接将计划添加到 workout_plans 表中。
+
+    Args:
+        plan_db_id: 计划在数据库中的ID
+        data: 包含 response_status (confirmed/rejected)
+
+    Returns:
+        ChatGeneratedPlanResponse: 更新后的计划
+    """
+    from datetime import date
+    from app.services.workout_service import WorkoutService
+    from sqlalchemy import select
+    from app.models.chat_session import ChatGeneratedPlan
+
+    chat_service = ChatService(db)
+    workout_service = WorkoutService(db)
+
+    # 如果用户确认计划，先创建 workout_plan 记录
+    applied_plan_id = None
+    if data.response_status == "confirmed":
+        # 获取生成的计划详情
+        result = await db.execute(
+            select(ChatGeneratedPlan).where(
+                ChatGeneratedPlan.id == plan_db_id,
+                ChatGeneratedPlan.user_id == str(current_user.id)
+            )
+        )
+        generated_plan = result.scalar_one_or_none()
+
+        if not generated_plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="计划不存在或无权访问"
+            )
+
+        # 创建 workout_plan 记录
+        workout_plan = await workout_service.create_plan(
+            user_id=str(current_user.id),
+            plan_date=date.today(),
+            title=generated_plan.title,
+            subtitle=generated_plan.subtitle or "",
+            total_duration=generated_plan.total_duration,
+            scene=generated_plan.scene,
+            rpe=generated_plan.rpe,
+            modules=generated_plan.modules,
+            ai_note=generated_plan.ai_note,
+            is_applied=True,
+        )
+        applied_plan_id = str(workout_plan.id)
+
+        # 更新 generated_plan 的 applied_plan_id
+        generated_plan.applied_plan_id = applied_plan_id
+        await db.commit()
+
+    # 更新响应状态
+    plan = await chat_service.update_generated_plan_response(
+        str(current_user.id), plan_db_id, data.response_status
+    )
+
+    # 返回包含 applied_plan_id 的响应
+    return ChatGeneratedPlanResponse(
+        id=str(plan.id),
+        session_id=plan.session_id,
+        message_id=plan.message_id,
+        title=plan.title,
+        subtitle=plan.subtitle,
+        total_duration=plan.total_duration,
+        scene=plan.scene,
+        rpe=plan.rpe,
+        ai_note=plan.ai_note,
+        modules=plan.modules,
+        response_status=plan.response_status,
+        applied_plan_id=applied_plan_id,
+        generated_at=plan.generated_at,
+        responded_at=plan.responded_at,
+        created_at=plan.created_at,
+        updated_at=plan.updated_at,
+    )

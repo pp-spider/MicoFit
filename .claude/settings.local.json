@@ -11,7 +11,24 @@
       "Bash(curl:*)",
       "Bash(sqlite3:*)",
       "Bash(pip install:*)",
-      "Bash(flutter analyze:*)"
+      "Bash(flutter analyze:*)",
+      "mcp__web-reader__webReader",
+      "Bash(del /F d:FlutterProjectsmicofitlibservicesai_fallback_service.dart)",
+      "mcp__web-search-prime__webSearchPrime",
+      "Bash(flutter pub deps:*)",
+      "Bash(flutter pub cache list:*)",
+      "Bash(flutter build:*)",
+      "Bash(flutter pub upgrade:*)",
+      "Bash(flutter clean:*)",
+      "Bash(del \"d:\\\\FlutterProjects\\\\micofit\\\\lib\\\\widgets\\\\limitations_3d_viewer.dart\")",
+      "Bash(alembic current:*)",
+      "Bash(/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -Command \"python -c \"\"import ast; ast.parse\\(open\\(''app/agents/prompts.py''\\).read\\(\\)\\); print\\(''prompts.py OK''\\)\"\" 2\\\\u0026\\\\u003e1\")",
+      "Bash(conda activate python3.12)",
+      "Bash(python -m py_compile backend/app/agents/models.py backend/app/agents/shared_context.py backend/app/agents/task_executor.py backend/app/agents/planner_agent.py)",
+      "Bash(python -m py_compile backend/app/agents/task_executor.py)",
+      "Bash(python -m py_compile backend/app/agents/planner_agent.py)",
+      "Bash(alembic upgrade head)",
+      "Bash(alembic heads)"
     ]
   }
 }

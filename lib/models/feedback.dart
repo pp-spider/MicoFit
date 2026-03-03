@@ -5,11 +5,13 @@ class WorkoutFeedback {
   final CompletionLevel completion;
   final FeelingLevel feeling;
   final TomorrowPreference tomorrow;
+  final List<String> painLocations;  // 疼痛部位列表
 
   WorkoutFeedback({
     required this.completion,
     required this.feeling,
     required this.tomorrow,
+    this.painLocations = const [],  // 默认空数组
   });
 
   Map<String, dynamic> toJson() {
@@ -17,7 +19,26 @@ class WorkoutFeedback {
       'completion': completion.name,
       'feeling': feeling.name,
       'tomorrow': tomorrow.name,
+      'painLocations': painLocations,
     };
+  }
+
+  factory WorkoutFeedback.fromJson(Map<String, dynamic> json) {
+    return WorkoutFeedback(
+      completion: CompletionLevel.values.firstWhere(
+        (e) => e.name == json['completion'],
+        orElse: () => CompletionLevel.smooth,
+      ),
+      feeling: FeelingLevel.values.firstWhere(
+        (e) => e.name == json['feeling'],
+        orElse: () => FeelingLevel.justRight,
+      ),
+      tomorrow: TomorrowPreference.values.firstWhere(
+        (e) => e.name == json['tomorrow'],
+        orElse: () => TomorrowPreference.maintain,
+      ),
+      painLocations: List<String>.from(json['painLocations'] as List? ?? []),
+    );
   }
 }
 

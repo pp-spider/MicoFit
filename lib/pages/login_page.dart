@@ -1,36 +1,80 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/auth_provider.dart';
+import 'terms_of_service_page.dart';
+import 'privacy_policy_page.dart';
 
-/// 登录页面
+/// 登录/注册页面
 class LoginPage extends StatefulWidget {
-  final VoidCallback onLoginSuccess;
-  final VoidCallback onRegister;
-  final VoidCallback? onSkip; // 离线模式跳过
-
-  const LoginPage({
-    super.key,
-    required this.onLoginSuccess,
-    required this.onRegister,
-    this.onSkip,
-  });
+  const LoginPage({super.key});
 
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _userIdController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+
+  bool _isLogin = true;
   bool _obscurePassword = true;
-  bool _isLoading = false;
+  bool _agreeToTerms = false;
 
   @override
   void dispose() {
-    _userIdController.dispose();
+    _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    if (!_isLogin && !_agreeToTerms) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请阅读并同意用户协议和隐私政策')),
+      );
+      return;
+    }
+
+    final authProvider = context.read<AuthProvider>();
+    bool success;
+
+    if (_isLogin) {
+      success = await authProvider.login(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+    } else {
+      success = await authProvider.register(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+        nickname: '', // 昵称在后续个人信息填写中设置
+      );
+    }
+
+    if (success && mounted) {
+      // 注册成功显示提示
+      if (!_isLogin) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('注册成功'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+      // 成功后 AuthProvider 会通知监听者，MainPage 会自动跳转
+    } else if (!success && mounted) {
+      // 显示错误信息
+      final error = authProvider.errorMessage ?? '操作失败，请重试';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error)),
+      );
+    }
   }
 
   @override
@@ -38,175 +82,40 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F0),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 16),
-
-              // 顶部导航栏
-              _buildHeader(),
-              const SizedBox(height: 40),
-
-              // Logo 区域
-              _buildLogo(),
-              const SizedBox(height: 32),
-
-              // 标题
-              const Text(
-                '欢迎回来',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF115E59),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '继续你的健身旅程',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                ),
-              ),
-              const SizedBox(height: 32),
-
-              // 账号输入框
-              TextField(
-                controller: _userIdController,
-                decoration: const InputDecoration(
-                  labelText: '账号',
-                  hintText: '请输入账号',
-                  prefixIcon: Icon(Icons.person),
-                ),
-                textInputAction: TextInputAction.next,
-              ),
-              const SizedBox(height: 16),
-
-              // 密码输入框
-              TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                decoration: InputDecoration(
-                  labelText: '密码',
-                  hintText: '请输入密码',
-                  prefixIcon: const Icon(Icons.lock),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                        _obscurePassword ? Icons.visibility : Icons.visibility_off),
-                    onPressed: () =>
-                        setState(() => _obscurePassword = !_obscurePassword),
-                  ),
-                ),
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => _isLoading ? null : _handleLogin(),
-              ),
-              const SizedBox(height: 24),
-
-              // 错误提示
-              Consumer<AuthProvider>(
-                builder: (context, authProvider, _) {
-                  if (authProvider.errorMessage != null) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 16),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEE2E2),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFEF4444)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.error, color: Color(0xFFEF4444), size: 20),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              authProvider.errorMessage!,
-                              style: const TextStyle(color: Color(0xFFEF4444)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                  return const SizedBox.shrink();
-                },
-              ),
-
-              // 登录按钮
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _handleLogin,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2DD4BF),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text(
-                          '登录',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-              ),
-              ),
-              const SizedBox(height: 16),
-
-              // 注册链接
-              Row(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Form(
+              key: _formKey,
+              child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('还没有账号？', style: TextStyle(color: Colors.grey[600])),
-                  TextButton(
-                    onPressed: widget.onRegister,
-                    child: const Text(
-                      '注册',
-                      style: TextStyle(
-                        color: Color(0xFF2DD4BF),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
+                  // Logo 和标题
+                  _buildHeader(),
+
+                  const SizedBox(height: 40),
+
+                  // 切换登录/注册
+                  _buildToggle(),
+
+                  const SizedBox(height: 24),
+
+                  // 表单
+                  _buildForm(),
+
+                  const SizedBox(height: 16),
+
+                  // 用户协议（仅注册时显示）
+                  if (!_isLogin) _buildTerms(),
+
+                  const SizedBox(height: 24),
+
+                  // 提交按钮
+                  _buildSubmitButton(),
                 ],
               ),
-
-              // 或分隔线
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Row(
-                  children: [
-                    Expanded(child: Divider(color: Colors.grey[300])),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('或', style: TextStyle(color: Colors.grey[400])),
-                    ),
-                    Expanded(child: Divider(color: Colors.grey[300])),
-                  ],
-                ),
-              ),
-
-              // 跳过按钮（离线模式）
-              if (widget.onSkip != null)
-                TextButton(
-                  onPressed: widget.onSkip,
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.grey[600],
-                  ),
-                  child: const Text('跳过，离线使用'),
-                ),
-
-              const SizedBox(height: 32),
-            ],
+            ),
           ),
         ),
       ),
@@ -214,65 +123,232 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _buildHeader() {
-    return Row(
+    return Column(
       children: [
-        IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: const Color(0xFF2DD4BF),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Icon(
+            Icons.fitness_center_rounded,
+            size: 48,
+            color: Colors.white,
+          ),
         ),
-        const Spacer(),
+        const SizedBox(height: 16),
         const Text(
           '微动 MicoFit',
           style: TextStyle(
-            fontSize: 18,
+            fontSize: 28,
             fontWeight: FontWeight.bold,
             color: Color(0xFF115E59),
           ),
         ),
-        const Spacer(flex: 2),
+        const SizedBox(height: 8),
+        Text(
+          _isLogin ? '登录您的账户' : '创建新账户',
+          style: TextStyle(
+            fontSize: 16,
+            color: Colors.grey[600],
+          ),
+        ),
       ],
     );
   }
 
-  Widget _buildLogo() {
-    return Center(
-      child: Container(
-        width: 80,
-        height: 80,
+  Widget _buildToggle() {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildToggleButton(
+              label: '登录',
+              isSelected: _isLogin,
+              onTap: () => setState(() => _isLogin = true),
+            ),
+          ),
+          Expanded(
+            child: _buildToggleButton(
+              label: '注册',
+              isSelected: !_isLogin,
+              onTap: () => setState(() => _isLogin = false),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleButton({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFF2DD4BF).withOpacity(0.1),
-          shape: BoxShape.circle,
+          color: isSelected ? const Color(0xFF2DD4BF) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
         ),
-        child: const Icon(
-          Icons.fitness_center,
-          size: 40,
-          color: Color(0xFF2DD4BF),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: isSelected ? Colors.white : const Color(0xFF115E59),
+          ),
         ),
       ),
     );
   }
 
-  void _handleLogin() async {
-    final userId = _userIdController.text.trim();
-    final password = _passwordController.text;
+  Widget _buildForm() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // 邮箱
+        TextFormField(
+          controller: _emailController,
+          keyboardType: TextInputType.emailAddress,
+          textInputAction: TextInputAction.next,
+          decoration: const InputDecoration(
+            labelText: '邮箱',
+            hintText: '请输入邮箱地址',
+            prefixIcon: Icon(Icons.email_outlined),
+          ),
+          validator: (value) {
+            if (value == null || value.isEmpty) {
+              return '请输入邮箱';
+            }
+            if (!value.contains('@')) {
+              return '请输入有效的邮箱地址';
+            }
+            return null;
+          },
+        ),
 
-    if (userId.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入账号和密码')),
-      );
-      return;
-    }
+        const SizedBox(height: 16),
 
-    setState(() => _isLoading = true);
+        // 密码
+        TextFormField(
+          controller: _passwordController,
+          obscureText: _obscurePassword,
+          textInputAction: _isLogin ? TextInputAction.done : TextInputAction.next,
+          decoration: InputDecoration(
+            labelText: '密码',
+            hintText: _isLogin ? '请输入密码' : '请设置密码（至少6位）',
+            prefixIcon: const Icon(Icons.lock_outlined),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+              ),
+              onPressed: () {
+                setState(() => _obscurePassword = !_obscurePassword);
+              },
+            ),
+          ),
+          validator: (value) {
+            if (value == null || value.isEmpty) {
+              return '请输入密码';
+            }
+            if (!_isLogin && value.length < 6) {
+              return '密码至少需要6位';
+            }
+            return null;
+          },
+        ),
 
-    final authProvider = context.read<AuthProvider>();
-    final prefs = await SharedPreferences.getInstance();
-    final success = await authProvider.login(userId, password, prefs);
+      ],
+    );
+  }
 
-    setState(() => _isLoading = false);
+  Widget _buildTerms() {
+    return Row(
+      children: [
+        Checkbox(
+          value: _agreeToTerms,
+          onChanged: (value) {
+            setState(() => _agreeToTerms = value ?? false);
+          },
+          activeColor: const Color(0xFF2DD4BF),
+        ),
+        Expanded(
+          child: Wrap(
+            children: [
+              const Text('我已阅读并同意'),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const TermsOfServicePage(),
+                    ),
+                  );
+                },
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text('用户协议'),
+              ),
+              const Text('和'),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const PrivacyPolicyPage(),
+                    ),
+                  );
+                },
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text('隐私政策'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
-    if (success && mounted) {
-      widget.onLoginSuccess();
-    }
+  Widget _buildSubmitButton() {
+    final authProvider = context.watch<AuthProvider>();
+
+    return ElevatedButton(
+      onPressed: authProvider.isLoading ? null : _submit,
+      style: ElevatedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+      ),
+      child: authProvider.isLoading
+          ? const SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            )
+          : Text(
+              _isLogin ? '登录' : '注册',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+    );
   }
 }

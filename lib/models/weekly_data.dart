@@ -124,66 +124,34 @@ class MonthlyStats {
     };
   }
 
-  /// 创建当前月份的示例数据
+  /// 创建当前月份的空数据（全0初始化）
   factory MonthlyStats.createSample() {
     final now = DateTime.now();
     final year = now.year;
     final month = now.month;
     final daysInMonth = DateTime(year, month + 1, 0).day;
 
-    // 生成示例数据
+    // 生成全0数据
     final List<DayRecord> records = [];
-    int totalMinutes = 0;
-    int completedDays = 0;
 
     for (int day = 1; day <= daysInMonth; day++) {
       final date = DateTime(year, month, day);
       final dayOfWeek = date.weekday % 7; // 0-6, 0是周日
-      final isToday = day == now.day;
-      final isFuture = day > now.day;
-
-      DayStatus status;
-      int duration = 0;
-
-      if (isFuture) {
-        status = DayStatus.none;
-      } else if (isToday) {
-        // 今天部分完成
-        status = DayStatus.partial;
-        duration = 8;
-        totalMinutes += duration;
-      } else {
-        // 随机生成历史数据
-        final random = (day * 7 + month * 3) % 10;
-        if (random >= 7) {
-          status = DayStatus.completed;
-          duration = 12 + (random % 8);
-          totalMinutes += duration;
-          completedDays++;
-        } else if (random >= 4) {
-          status = DayStatus.partial;
-          duration = 5 + (random % 5);
-          totalMinutes += duration;
-          completedDays++;
-        } else {
-          status = DayStatus.none;
-        }
-      }
 
       records.add(DayRecord(
         date: '$year-${month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}',
         dayOfWeek: dayOfWeek,
-        duration: duration,
-        status: status,
+        duration: 0,
+        status: DayStatus.none,
       ));
     }
 
     return MonthlyStats(
       year: year,
       month: month,
-      totalMinutes: totalMinutes,
+      totalMinutes: 0,
       targetMinutes: 300, // 目标300分钟/月
-      completedDays: completedDays,
+      completedDays: 0,
       records: records,
     );
   }

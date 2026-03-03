@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "micofit" "\0"
+            VALUE "CompanyName", "MicoFit" "\0"
+            VALUE "FileDescription", "MicoFit" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "micofit" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
+            VALUE "InternalName", "MicoFit" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 MicoFit. All rights reserved." "\0"
             VALUE "OriginalFilename", "micofit.exe" "\0"
-            VALUE "ProductName", "micofit" "\0"
+            VALUE "ProductName", "MicoFit" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

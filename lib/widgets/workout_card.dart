@@ -1,18 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/workout.dart';
+import '../providers/workout_progress_provider.dart';
 
 /// 训练计划卡片
 class WorkoutCard extends StatefulWidget {
   final WorkoutPlan workoutPlan;
-  final int refreshCount;
-  final VoidCallback onRefresh;
   final VoidCallback onStartWorkout;
 
   const WorkoutCard({
     super.key,
     required this.workoutPlan,
-    required this.refreshCount,
-    required this.onRefresh,
     required this.onStartWorkout,
   });
 
@@ -65,7 +63,7 @@ class _WorkoutCardState extends State<WorkoutCard>
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
+              color: Colors.black.withValues(alpha: 0.08),
               blurRadius: 16,
               offset: const Offset(0, 4),
             ),
@@ -75,51 +73,6 @@ class _WorkoutCardState extends State<WorkoutCard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // AI Badge & Refresh
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEDE9FE),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.sync,
-                        size: 16,
-                        color: Color(0xFF8B5CF6),
-                      ),
-                      const SizedBox(width: 4),
-                      const Text(
-                        '根据昨日反馈自动优化',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF8B5CF6),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: widget.refreshCount > 0 ? widget.onRefresh : null,
-                  icon: const Icon(Icons.refresh, size: 16),
-                  label: Text('换一组 (${widget.refreshCount})'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: widget.refreshCount > 0
-                        ? Colors.grey[600]
-                        : Colors.grey[300],
-                  ),
-                ),
-              ],
-            ),
-
             const SizedBox(height: 24),
 
             // Title
@@ -190,26 +143,39 @@ class _WorkoutCardState extends State<WorkoutCard>
 
             const SizedBox(height: 24),
 
-            // Start Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: widget.onStartWorkout,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2DD4BF),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+            // Start Button - 根据进度状态显示不同按钮
+            Consumer<WorkoutProgressProvider>(
+              builder: (context, progressProvider, child) {
+                final isCompleted = progressProvider.isTodayCompleted;
+
+                return SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: isCompleted
+                        ? () => _showCompletedDialog(context, progressProvider)
+                        : widget.onStartWorkout,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isCompleted
+                          ? const Color(0xFF10B981)
+                          : const Color(0xFF2DD4BF),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: 8,
+                      shadowColor: (isCompleted
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFF2DD4BF))
+                          .withValues(alpha: 0.4),
+                    ),
+                    child: Text(
+                      isCompleted ? '今日任务已完成' : '开始训练',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                    ),
                   ),
-                  elevation: 8,
-                  shadowColor: const Color(0xFF2DD4BF).withOpacity(0.4),
-                ),
-                child: const Text(
-                  '开始训练',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
-              ),
+                );
+              },
             ),
           ],
         ),
@@ -286,6 +252,8 @@ class _WorkoutCardState extends State<WorkoutCard>
                             fontSize: 12,
                             color: Colors.grey[500],
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
@@ -328,11 +296,15 @@ class _WorkoutCardState extends State<WorkoutCard>
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    exercise.name,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Color(0xFF115E59),
+                                  Expanded(
+                                    child: Text(
+                                      exercise.name,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        color: Color(0xFF115E59),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
                                   Text(
@@ -381,6 +353,114 @@ class _WorkoutCardState extends State<WorkoutCard>
                 color: Color(0xFF5B21B6),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 显示已完成对话框
+  void _showCompletedDialog(BuildContext context, WorkoutProgressProvider progressProvider) {
+    final progress = progressProvider.progress;
+    final duration = progress?.actualDuration ?? 0;
+    final minutes = (duration / 60).floor();
+    final seconds = duration % 60;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD1FAE5),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.check_circle,
+                color: Color(0xFF10B981),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              '今日任务已完成',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF115E59),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '恭喜你完成了今天的训练！',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey[700],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9FAFB),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '训练时长',
+                        style: TextStyle(color: Colors.grey[600]),
+                      ),
+                      Text(
+                        minutes > 0 ? '$minutes分$seconds秒' : '$seconds秒',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF115E59),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              '取消',
+              style: TextStyle(
+                color: Colors.grey[600],
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              // 重新开始训练
+              await progressProvider.resetProgress(widget.workoutPlan);
+              widget.onStartWorkout();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2DD4BF),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('重新开始'),
           ),
         ],
       ),
