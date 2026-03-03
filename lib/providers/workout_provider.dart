@@ -13,6 +13,11 @@ class WorkoutProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
 
+  // 历史训练计划
+  List<WorkoutPlan> _historyPlans = [];
+  bool _isLoadingHistory = false;
+  String? _historyErrorMessage;
+
   WorkoutProvider();
 
   // Getters
@@ -20,6 +25,11 @@ class WorkoutProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   bool get hasWorkout => _todayWorkout != null;
+
+  // 历史记录 Getters
+  List<WorkoutPlan> get historyPlans => _historyPlans;
+  bool get isLoadingHistory => _isLoadingHistory;
+  String? get historyErrorMessage => _historyErrorMessage;
 
   /// 加载今日训练计划
   /// 优先从后端获取已应用的今日训练计划（is_applied=true），如果后端没有则使用本地生成
@@ -136,7 +146,26 @@ class WorkoutProvider extends ChangeNotifier {
     }
   }
 
-  /// 获取历史训练计划（从后端）
+  /// 加载历史训练计划（从后端）
+  Future<void> loadHistoryPlans({DateTime? startDate, DateTime? endDate, int limit = 20}) async {
+    _isLoadingHistory = true;
+    _historyErrorMessage = null;
+    notifyListeners();
+
+    try {
+      final plans = await _apiService.getHistoryPlans(startDate: startDate, endDate: endDate, limit: limit);
+      _historyPlans = plans;
+      debugPrint('[WorkoutProvider] 加载历史计划成功: ${plans.length} 条');
+    } catch (e) {
+      debugPrint('[WorkoutProvider] 获取历史计划失败: $e');
+      _historyErrorMessage = e.toString();
+    } finally {
+      _isLoadingHistory = false;
+      notifyListeners();
+    }
+  }
+
+  /// 获取历史训练计划（向后兼容，直接返回列表）
   Future<List<WorkoutPlan>> getHistoryPlans({DateTime? startDate, DateTime? endDate}) async {
     try {
       return await _apiService.getHistoryPlans(startDate: startDate, endDate: endDate);

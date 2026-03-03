@@ -8,6 +8,8 @@ import '../models/workout.dart';
 import '../services/avatar_service.dart';
 import '../services/workout_api_service.dart';
 import '../widgets/bottom_nav.dart';
+import '../providers/workout_provider.dart';
+import 'package:provider/provider.dart';
 import '../widgets/empty_state_widget.dart';
 
 /// 个人资料页面
@@ -35,11 +37,6 @@ class _ProfilePageState extends State<ProfilePage> {
   // 目标设置状态
   late int _weeklyDays;
   late int _timeBudget;
-
-  // 历史训练计划
-  final WorkoutApiService _workoutApiService = WorkoutApiService();
-  List<WorkoutPlan> _historyPlans = [];
-  bool _isLoadingHistory = false;
 
   // 头像服务
   final AvatarService _avatarService = AvatarService();
@@ -212,22 +209,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
   // 加载历史训练计划
   Future<void> _loadHistoryPlans() async {
-    setState(() => _isLoadingHistory = true);
-    try {
-      final plans = await _workoutApiService.getHistoryPlans(limit: 20);
-      debugPrint('[ProfilePage] 加载历史计划成功: ${plans.length} 条');
-      if (mounted) {
-        setState(() {
-          _historyPlans = plans;
-          _isLoadingHistory = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('[ProfilePage] 加载历史计划失败: $e');
-      if (mounted) {
-        setState(() => _isLoadingHistory = false);
-      }
-    }
+    final workoutProvider = context.read<WorkoutProvider>();
+    await workoutProvider.loadHistoryPlans();
   }
 
   @override
@@ -1350,79 +1333,84 @@ class _ProfilePageState extends State<ProfilePage> {
 
   // 构建历史训练计划卡片
   Widget _buildHistoryPlansCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2DD4BF).withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.history, color: Color(0xFF2DD4BF), size: 20),
+    return Consumer<WorkoutProvider>(
+      builder: (context, workoutProvider, child) {
+        final historyPlans = workoutProvider.historyPlans;
+        final isLoadingHistory = workoutProvider.isLoadingHistory;
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
-              const SizedBox(width: 12),
-              const Text(
-                '历史训练计划',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF115E59),
-                  fontSize: 16,
-                ),
-              ),
-              const Spacer(),
-              if (_isLoadingHistory)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
             ],
           ),
-          const SizedBox(height: 16),
-
-          if (_historyPlans.isEmpty && !_isLoadingHistory)
-            Container(
-              padding: const EdgeInsets.all(24),
-              child: Center(
-                child: Column(
-                  children: [
-                    Icon(Icons.fitness_center, size: 40, color: Colors.grey[300]),
-                    const SizedBox(height: 8),
-                    Text(
-                      '暂无历史训练计划',
-                      style: TextStyle(color: Colors.grey[500], fontSize: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2DD4BF).withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
                     ),
-                  ],
-                ),
+                    child: const Icon(Icons.history, color: Color(0xFF2DD4BF), size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    '历史训练计划',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF115E59),
+                      fontSize: 16,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (isLoadingHistory)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                ],
               ),
-            )
-          else
-            SizedBox(
-              height: 235, // 固定高度，可完整展示3条记录
-              child: ListView.separated(
-                shrinkWrap: true,
-                physics: const ClampingScrollPhysics(),
-                itemCount: _historyPlans.length,
-                separatorBuilder: (context, index) => const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  final plan = _historyPlans[index];
+              const SizedBox(height: 16),
+
+              if (historyPlans.isEmpty && !isLoadingHistory)
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(Icons.fitness_center, size: 40, color: Colors.grey[300]),
+                        const SizedBox(height: 8),
+                        Text(
+                          '暂无历史训练计划',
+                          style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                SizedBox(
+                  height: 235, // 固定高度，可完整展示3条记录
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    physics: const ClampingScrollPhysics(),
+                    itemCount: historyPlans.length,
+                    separatorBuilder: (context, index) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final plan = historyPlans[index];
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
                     onTap: () => _showPlanDetailDialog(plan),
@@ -1472,8 +1460,10 @@ class _ProfilePageState extends State<ProfilePage> {
                 },
               ),
             ),
-        ],
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 

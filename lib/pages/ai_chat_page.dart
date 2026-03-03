@@ -9,6 +9,7 @@ import '../widgets/bottom_nav.dart';
 import '../widgets/empty_state_widget.dart';
 import '../widgets/agent_accordion.dart';
 import '../providers/chat_provider.dart';
+import '../providers/workout_provider.dart';
 import '../services/network_service.dart';
 import 'chat_sessions_page.dart';
 import 'package:provider/provider.dart';
@@ -1574,7 +1575,15 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
           child: ElevatedButton(
             onPressed: chatProvider.isApplyingPlan
                 ? null
-                : () => chatProvider.applyWorkoutPlan(plan, messageId: messageId),
+                : () async {
+                    final success = await chatProvider.applyWorkoutPlan(plan, messageId: messageId);
+                    if (success && mounted) {
+                      // 刷新 WorkoutProvider 以更新今日计划和历史记录
+                      final workoutProvider = context.read<WorkoutProvider>();
+                      workoutProvider.loadTodayWorkout();
+                      workoutProvider.loadHistoryPlans();
+                    }
+                  },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2DD4BF),
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1950,7 +1959,15 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
           child: ElevatedButton(
             onPressed: chatProvider.isApplyingPlan
                 ? null
-                : () => chatProvider.applyWorkoutPlan(plan, messageId: messageId),
+                : () async {
+                    final success = await chatProvider.applyWorkoutPlan(plan, messageId: messageId);
+                    if (success && mounted) {
+                      // 刷新 WorkoutProvider 以更新今日计划和历史记录
+                      final workoutProvider = context.read<WorkoutProvider>();
+                      workoutProvider.loadTodayWorkout();
+                      workoutProvider.loadHistoryPlans();
+                    }
+                  },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2DD4BF),
               padding: const EdgeInsets.symmetric(vertical: 12),

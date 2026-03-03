@@ -10,6 +10,7 @@ import '../services/chat_local_service.dart';
 import '../services/ai_api_service.dart';
 import '../services/chat_session_api_service.dart';
 import '../services/data_sync_service.dart';
+import '../services/workout_api_service.dart';
 import '../utils/user_data_helper.dart';
 
 /// AI 聊天流式生成状态
@@ -1230,7 +1231,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 应用健身计划
   /// [plan] 训练计划
   /// [messageId] 关联的消息ID，用于与后端数据库关联
-  Future<void> applyWorkoutPlan(WorkoutPlan plan, {String? messageId}) async {
+  /// 返回是否成功应用计划
+  Future<bool> applyWorkoutPlan(WorkoutPlan plan, {String? messageId}) async {
     _isApplyingPlan = true;
     notifyListeners();
 
@@ -1240,7 +1242,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _isApplyingPlan = false;
       notifyListeners();
       debugPrint('[ChatProvider] 用户未登录，无法应用计划');
-      return;
+      return false;
     }
 
     try {
@@ -1262,6 +1264,18 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             final result = await _sessionApiService.updateGeneratedPlanResponse(planDbId, 'confirmed');
             workoutPlanId = result['applied_plan_id'] as String?;
             debugPrint('[ChatProvider] 后端计划状态已更新为 confirmed, messageId: $messageId, workoutPlanId: $workoutPlanId');
+
+            // 调用后端 API 将计划应用到用户（保存到 workout_plan 表）
+            if (workoutPlanId != null) {
+              try {
+                final workoutApiService = WorkoutApiService();
+                await workoutApiService.applyPlan(workoutPlanId);
+                debugPrint('[ChatProvider] 计划已成功应用到用户: $workoutPlanId');
+              } catch (e) {
+                debugPrint('[ChatProvider] 应用计划到后端失败: $e');
+                // 继续执行，不阻止本地流程
+              }
+            }
           } catch (e) {
             debugPrint('[ChatProvider] 更新后端计划状态失败: $e');
           }
@@ -1291,6 +1305,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _isApplyingPlan = false;
 
       notifyListeners();
+      return true;
     } catch (e) {
       _isApplyingPlan = false;
 
@@ -1301,6 +1316,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       await _localService.saveMessage(errorMessage);
 
       notifyListeners();
+      return false;
     }
   }
 
