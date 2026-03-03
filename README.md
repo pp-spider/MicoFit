@@ -9,6 +9,35 @@
 
 ---
 
+## 📸 应用截图
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center"><b>今日计划</b></td>
+      <td align="center"><b>AI 教练</b></td>
+      <td align="center"><b>计划生成中</b></td>
+    </tr>
+    <tr>
+      <td><img src="img/1.jpg" width="200" alt="今日计划"/></td>
+      <td><img src="img/2.jpg" width="200" alt="AI 教练"/></td>
+      <td><img src="img/3.jpg" width="200" alt="计划生成中"/></td>
+    </tr>
+    <tr>
+      <td align="center"><b>多 Agent 协作</b></td>
+      <td align="center"><b>训练计划UI</b></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><img src="img/4.jpg" width="200" alt="多 Agent 协作"/></td>
+      <td><img src="img/5.jpg" width="200" alt="动作详情"/></td>
+      <td></td>
+    </tr>
+  </table>
+</div>
+
+---
+
 ## 📱 项目概述
 
 **微动 MicoFit** 是一个基于 Flutter + FastAPI 的全栈健身应用，专为忙碌人群设计。应用核心理念是**打破传统健身的时间与空间限制**，让用户可以在办公室、家中、户外等任意场景，利用碎片时间完成科学有效的训练。
