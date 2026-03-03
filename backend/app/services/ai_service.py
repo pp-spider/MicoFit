@@ -120,6 +120,15 @@ class AIService:
         full_content = ""
         workout_plans = []  # 改为列表，支持多个训练计划
 
+        # 预先创建AI助手消息（占位），以便在plan事件中可以带上message_id
+        assistant_message = await self.chat_service.add_message(
+            session_id=session_id,
+            role="assistant",
+            content="",  # 占位，后续会更新
+            data_type="text"
+        )
+        message_id = str(assistant_message.id)
+
         async for chunk in self.planner_agent.process(
             user_id=user_id,
             session_id=session_id,
@@ -197,7 +206,8 @@ class AIService:
                         "plan": plan_data,
                         "plan_id": str(plan_record.id),
                         "plan_index": len(workout_plans) - 1,  # 计划索引
-                        "total_plans": len(workout_plans)  # 总计划数
+                        "total_plans": len(workout_plans),  # 总计划数
+                        "message_id": message_id  # 关联的消息ID
                     }
                 except Exception as e:
                     logger.error(f"保存计划失败: {e}")
@@ -222,12 +232,17 @@ class AIService:
                         "primary_plan": all_plans[0]  # 保留主计划用于兼容
                     }
 
-                message = await self.context_service.add_message_and_update_summary(
-                    session_id=session_id,
-                    role="assistant",
+                # 更新之前创建的占位消息
+                await self.chat_service.update_message(
+                    message_id=message_id,
                     content=final_content,
                     structured_data=structured_data,
                     data_type="workout_plan" if all_plans else "text"
+                )
+                # 更新会话摘要
+                await self.context_service.update_session_summary(
+                    session_id=session_id,
+                    summary=final_content
                 )
                 yield {
                     "type": "done",
@@ -235,7 +250,7 @@ class AIService:
                     "has_plan": len(all_plans) > 0,
                     "has_multiple_plans": len(all_plans) > 1,
                     "plans_count": len(all_plans),
-                    "message_id": str(message.id),  # 返回后端生成的消息ID
+                    "message_id": message_id,  # 返回消息ID
                     "content": final_content  # 返回最终内容给前端
                 }
             elif chunk["type"] == "agent_status":

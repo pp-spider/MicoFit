@@ -164,6 +164,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 多计划场景：每个计划的确认状态映射（key: plan.id, value: true=已确认, false=已取消）
   final Map<String, bool> _pendingPlanConfirmed = {};
 
+  /// 存储后端生成的计划数据库ID (plan.id -> db_id)
+  final Map<String, String> _pendingPlanDbIds = {};
+
+  /// 消息ID到计划ID列表的映射（实现消息与计划的一对多绑定）
+  final Map<String, List<String>> _messagePlanIds = {};
+
   /// 当前会话ID
   String? _currentSessionId;
 
@@ -323,6 +329,16 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           ? _pendingPlanConfirmed[planId]
           : null;
 
+  /// 获取指定消息关联的训练计划列表
+  List<WorkoutPlan> getPlansForMessage(String messageId) {
+    final planIds = _messagePlanIds[messageId];
+    if (planIds == null || planIds.isEmpty) {
+      return [];
+    }
+
+    return _pendingWorkoutPlans.where((plan) => planIds.contains(plan.id)).toList();
+  }
+
   String? get streamingMessageId => _streamingMessageId;
   String? get currentSessionId => _currentSessionId;
 
@@ -452,6 +468,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 从历史消息中解析待确认的训练计划
   void _parseWorkoutPlansFromMessages() {
     for (final message in _messages) {
+      // 从消息的 planIds 字段恢复绑定关系（新数据格式）
+      if (message.planIds != null && message.planIds!.isNotEmpty) {
+        _messagePlanIds[message.id] = message.planIds!;
+        debugPrint('[ChatProvider] 从消息 ${message.id} 恢复计划绑定: ${message.planIds}');
+      }
+
       if (message.type == ChatMessageType.assistant &&
           message.dataType == ChatMessageDataType.workoutPlan &&
           message.structuredData != null) {
@@ -482,6 +504,14 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           } catch (e) {
             debugPrint('[ChatProvider] 解析单计划失败: $e');
           }
+        }
+
+        // 兼容旧数据：如果消息有 structuredData 但没有 planIds，从数据中恢复计划ID
+        if ((message.planIds == null || message.planIds!.isEmpty) &&
+            data.containsKey('id')) {
+          final planId = data['id'] as String;
+          _messagePlanIds[message.id] = [planId];
+          debugPrint('[ChatProvider] 兼容旧数据：消息 ${message.id} 绑定计划 $planId');
         }
 
         // 如果解析到了计划，设置为未响应状态
@@ -860,6 +890,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
               _isPlanConfirmed = null;
               // 保存计划列表到本地（不等待）
               _localService.savePendingPlans(_pendingWorkoutPlans);
+              // 保存到后端数据库（异步，不阻塞UI）
+              _saveGeneratedPlanToBackend(plan, chunk.messageId);
               // 通知UI更新显示计划预览
               notifyListeners();
             }
@@ -944,17 +976,31 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
               })
           .toList();
 
-      // 更新消息 - 包含 Agent 输出
+      // 收集当前批次生成的所有计划ID
+      final currentPlanIds = _pendingWorkoutPlans.map((p) => p.id).toList();
+
+      // 确定消息ID（优先使用后端返回的ID）
+      final messageId = backendMessageId ?? DateTime.now().millisecondsSinceEpoch.toString();
+
+      // 更新消息 - 包含 Agent 输出和计划ID绑定
       _updateMessage(
         ChatMessage.withAgentOutputs(
+          id: messageId,
           content: responseContent,
           agentOutputs: agentOutputs,
           workoutPlanJson: plan?.toJson(),
+          planIds: currentPlanIds.isNotEmpty ? currentPlanIds : null,
         ),
       );
 
-      // 关键：如果后端返回了消息ID，更新为后端ID
-      if (backendMessageId != null) {
+      // 记录消息与计划的绑定关系
+      if (currentPlanIds.isNotEmpty) {
+        _messagePlanIds[messageId] = currentPlanIds;
+        debugPrint('[ChatProvider] 消息 $messageId 绑定了计划: $currentPlanIds');
+      }
+
+      // 关键：如果后端返回了消息ID且与当前ID不同，更新为后端ID
+      if (backendMessageId != null && backendMessageId != messageId) {
         _updateMessageId(backendMessageId);
       }
     }
@@ -1195,6 +1241,17 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _pendingPlanResponded[plan.id] = true;
       _pendingPlanConfirmed[plan.id] = true;
 
+      // 更新后端响应状态
+      final planDbId = _pendingPlanDbIds[plan.id];
+      if (planDbId != null) {
+        try {
+          await _sessionApiService.updateGeneratedPlanResponse(planDbId, 'confirmed');
+          debugPrint('[ChatProvider] 后端计划状态已更新为 confirmed');
+        } catch (e) {
+          debugPrint('[ChatProvider] 更新后端计划状态失败: $e');
+        }
+      }
+
       // 检查是否所有计划都已响应
       final allResponded = _pendingWorkoutPlans.every(
         (p) => _pendingPlanResponded[p.id] == true,
@@ -1236,6 +1293,17 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // 标记该计划已拒绝
     _pendingPlanResponded[planId] = true;
     _pendingPlanConfirmed[planId] = false;
+
+    // 更新后端响应状态
+    final planDbId = _pendingPlanDbIds[planId];
+    if (planDbId != null) {
+      try {
+        await _sessionApiService.updateGeneratedPlanResponse(planDbId, 'rejected');
+        debugPrint('[ChatProvider] 后端计划状态已更新为 rejected');
+      } catch (e) {
+        debugPrint('[ChatProvider] 更新后端计划状态失败: $e');
+      }
+    }
 
     // 检查是否所有计划都已响应
     final allResponded = _pendingWorkoutPlans.every(
@@ -1285,6 +1353,35 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     await _localService.saveRespondedPlans(_pendingWorkoutPlans, statusMap);
 
     notifyListeners();
+  }
+
+  /// 保存生成的计划到后端数据库
+  Future<void> _saveGeneratedPlanToBackend(WorkoutPlan plan, String? messageId) async {
+    if (_currentSessionId == null) {
+      debugPrint('[ChatProvider] 无法保存计划到后端：当前会话ID为空');
+      return;
+    }
+
+    try {
+      final result = await _sessionApiService.createGeneratedPlan(
+        planId: plan.id,
+        sessionId: _currentSessionId!,
+        messageId: messageId,
+        title: plan.title,
+        subtitle: plan.subtitle,
+        totalDuration: plan.totalDuration,
+        scene: plan.scene,
+        rpe: plan.rpe,
+        aiNote: plan.aiNote,
+        modules: plan.modules.map((m) => m.toJson()).toList(),
+        generatedAt: DateTime.now(),
+      );
+      // 保存后端返回的数据库ID，用于后续更新响应状态
+      _pendingPlanDbIds[plan.id] = result['id'];
+      debugPrint('[ChatProvider] 计划已保存到后端，db_id: ${result['id']}');
+    } catch (e) {
+      debugPrint('[ChatProvider] 保存生成计划到后端失败: $e');
+    }
   }
 
   // ========== 聊天历史管理 ==========

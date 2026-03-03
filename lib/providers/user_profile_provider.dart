@@ -70,7 +70,7 @@ class UserProfileProvider extends ChangeNotifier {
   Future<void> saveProfile(UserProfile profile) async {
     // 检查网络状态
     final networkService = NetworkService();
-    final isConnected = await networkService.isConnected;
+    final isConnected = networkService.isConnected;
 
     if (!isConnected) {
       _errorMessage = '离线模式，修改失败';

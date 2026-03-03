@@ -51,6 +51,9 @@ class ChatMessage {
   // Agent 执行输出（用于多 Agent 场景）
   final List<AgentOutput>? agentOutputs;
 
+  // 关联的训练计划ID列表（实现消息与计划的一对多绑定）
+  final List<String>? planIds;
+
   ChatMessage({
     required this.id,
     required this.type,
@@ -60,6 +63,7 @@ class ChatMessage {
     this.dataType,
     this.sessionId,
     this.agentOutputs,
+    this.planIds,
   });
 
   /// 创建用户消息
@@ -103,6 +107,7 @@ class ChatMessage {
     required String content,
     required List<AgentOutput> agentOutputs,
     Map<String, dynamic>? workoutPlanJson,
+    List<String>? planIds,  // 关联的训练计划ID列表
   }) {
     return ChatMessage(
       id: id ?? DateTime.now().millisecondsSinceEpoch.toString(),  // 使用传入的ID或生成新ID
@@ -112,6 +117,7 @@ class ChatMessage {
       structuredData: workoutPlanJson,
       dataType: workoutPlanJson != null ? ChatMessageDataType.workoutPlan : null,
       agentOutputs: agentOutputs,
+      planIds: planIds,
     );
   }
 
@@ -132,6 +138,9 @@ class ChatMessage {
       sessionId: json['sessionId'] as String?,
       agentOutputs: (json['agentOutputs'] as List<dynamic>?)
           ?.map((e) => AgentOutput.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      planIds: (json['planIds'] as List<dynamic>?)
+          ?.map((e) => e as String)
           .toList(),
     );
   }
@@ -154,6 +163,9 @@ class ChatMessage {
       agentOutputs: (json['agent_outputs'] as List<dynamic>?)
           ?.map((e) => AgentOutput.fromJson(e as Map<String, dynamic>))
           .toList(),
+      planIds: (json['plan_ids'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList(),
     );
   }
 
@@ -169,6 +181,7 @@ class ChatMessage {
       if (sessionId != null) 'sessionId': sessionId,
       if (agentOutputs != null)
         'agentOutputs': agentOutputs!.map((e) => e.toJson()).toList(),
+      if (planIds != null) 'planIds': planIds,
     };
   }
 
@@ -182,6 +195,7 @@ class ChatMessage {
     ChatMessageDataType? dataType,
     String? sessionId,
     List<AgentOutput>? agentOutputs,
+    List<String>? planIds,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -192,6 +206,7 @@ class ChatMessage {
       dataType: dataType ?? this.dataType,
       sessionId: sessionId ?? this.sessionId,
       agentOutputs: agentOutputs ?? this.agentOutputs,
+      planIds: planIds ?? this.planIds,
     );
   }
 }

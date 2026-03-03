@@ -49,6 +49,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   late AnimationController _pulseController;
   late AnimationController _slideController;
 
+  // Provider 引用（用于在 dispose 中移除监听器，避免在 dispose 中访问 context）
+  ChatProvider? _chatProvider;
+
   // 跟踪已展开的训练计划卡片 (使用计划ID或消息索引)
   final Set<String> _expandedPlanCards = {};
 
@@ -165,6 +168,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
 
   /// Provider 变更监听器 - 在流式输出期间自动滚动
   void _onChatProviderChanged() {
+    // 检查 widget 是否仍然挂载，防止在 dispose 后访问 context
+    if (!mounted) return;
+
     final chatProvider = context.read<ChatProvider>();
     final isStreaming = chatProvider.isStreaming;
 
@@ -216,8 +222,8 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     super.didChangeDependencies();
     // 添加 Provider 监听器以在流式输出期间自动滚动（只注册一次）
     if (!_chatProviderListenerAdded) {
-      final chatProvider = context.read<ChatProvider>();
-      chatProvider.addListener(_onChatProviderChanged);
+      _chatProvider = context.read<ChatProvider>();
+      _chatProvider!.addListener(_onChatProviderChanged);
       _chatProviderListenerAdded = true;
     }
   }
@@ -226,9 +232,10 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   void dispose() {
     // 取消恢复自动滚动的计时器
     _resumeAutoScrollTimer?.cancel();
-    // 移除 Provider 监听器
-    final chatProvider = context.read<ChatProvider>();
-    chatProvider.removeListener(_onChatProviderChanged);
+    // 移除 Provider 监听器（使用保存的引用，避免在 dispose 中访问 context）
+    if (_chatProvider != null) {
+      _chatProvider!.removeListener(_onChatProviderChanged);
+    }
     // 确保动画控制器先停止再释放
     _pulseController.stop();
     _slideController.stop();
@@ -265,13 +272,13 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   /// 滚动到底部
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOutCubic,
-        );
-      }
+      // 检查 widget 是否仍然挂载且 ScrollController 有客户端
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      );
     });
   }
 
@@ -284,18 +291,18 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients && !_isUserScrolling) {
-        final maxScroll = _scrollController.position.maxScrollExtent;
-        final currentScroll = _scrollController.position.pixels;
-        // 只有当用户位于底部附近时才自动滚动（200像素的阈值，更宽松）
-        final distanceFromBottom = maxScroll - currentScroll;
-        if (distanceFromBottom < 200) {
-          _scrollController.animateTo(
-            maxScroll,
-            duration: const Duration(milliseconds: 100),
-            curve: Curves.easeOut,
-          );
-        }
+      // 检查 widget 是否仍然挂载且 ScrollController 有客户端
+      if (!mounted || !_scrollController.hasClients || _isUserScrolling) return;
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      final currentScroll = _scrollController.position.pixels;
+      // 只有当用户位于底部附近时才自动滚动（200像素的阈值，更宽松）
+      final distanceFromBottom = maxScroll - currentScroll;
+      if (distanceFromBottom < 200) {
+        _scrollController.animateTo(
+          maxScroll,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.easeOut,
+        );
       }
     });
   }
@@ -930,13 +937,16 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     final isUser = message.type == ChatMessageType.user;
     final isStreaming = message.id == chatProvider.streamingMessageId;
 
+    // 获取该消息关联的训练计划列表（消息与计划一对一绑定）
+    final messagePlans = chatProvider.getPlansForMessage(message.id);
+
     // 检查是否包含健身计划
     // 如果计划未响应，只在最后一条消息显示；如果已响应，始终显示（变灰状态）
     // 支持多计划场景
     final isPlanMessage =
         !isUser &&
         message.dataType == ChatMessageDataType.workoutPlan &&
-        chatProvider.pendingWorkoutPlans.isNotEmpty;
+        messagePlans.isNotEmpty;
     final hasWorkoutPlan =
         isPlanMessage &&
         (chatProvider.isPlanResponded || index == messages.length - 1);
@@ -998,17 +1008,17 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                           ),
                   ),
                 ),
-                // 健身计划预览（支持多计划）
-                if (hasWorkoutPlan && chatProvider.pendingWorkoutPlans.isNotEmpty)
-                  chatProvider.pendingWorkoutPlans.length == 1
+                // 健身计划预览（支持多计划）- 使用消息关联的计划
+                if (hasWorkoutPlan && messagePlans.isNotEmpty)
+                  messagePlans.length == 1
                       ? _buildWorkoutPlanPreview(
-                          chatProvider.pendingWorkoutPlans.first,
+                          messagePlans.first,
                           chatProvider,
                           chatProvider.isPlanResponded,
                           message.id,
                         )
                       : _buildMultipleWorkoutPlansPreview(
-                          chatProvider.pendingWorkoutPlans,
+                          messagePlans,
                           chatProvider,
                           message.id,
                         ),

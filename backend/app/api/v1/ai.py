@@ -204,7 +204,7 @@ async def regenerate_session_summary(
     ]
 
     summary = await context_service.summarizer.summarize_messages(messages)
-    await context_service._update_session_summary(session_id, summary)
+    await context_service.update_session_summary(session_id, summary)
 
     return {
         "session_id": session_id,
@@ -236,6 +236,8 @@ async def get_chat_messages(
     for session in sessions:
         messages = await chat_service.get_session_messages(session.id, limit=limit)
         for msg in messages:
+            # 获取消息关联的计划ID列表
+            plan_ids = await chat_service.get_message_plan_ids(str(msg.id))
             all_messages.append({
                 "id": str(msg.id),
                 "session_id": str(msg.session_id),
@@ -245,6 +247,7 @@ async def get_chat_messages(
                 "structured_data": msg.structured_data,
                 "tool_calls": msg.tool_calls,
                 "tool_call_id": msg.tool_call_id,
+                "plan_ids": plan_ids if plan_ids else None,
                 "created_at": msg.created_at.isoformat() if msg.created_at else None,
             })
 
@@ -286,16 +289,18 @@ async def get_session_memory(
     messages = await chat_service.get_session_messages(session_id, limit=50)
 
     # 构建消息列表（包含角色和内容）
-    message_history = [
-        {
+    message_history = []
+    for msg in messages:
+        # 获取消息关联的计划ID列表
+        plan_ids = await chat_service.get_message_plan_ids(str(msg.id))
+        message_history.append({
             "id": str(msg.id),
             "role": msg.role,
             "content": msg.content,
             "data_type": msg.data_type,
+            "plan_ids": plan_ids if plan_ids else None,
             "created_at": msg.created_at.isoformat() if msg.created_at else None,
-        }
-        for msg in messages
-    ]
+        })
 
     return {
         "session": {
@@ -344,20 +349,25 @@ async def get_session_messages_api(
         offset=offset
     )
 
+    # 构建消息列表，包含关联的计划ID
+    messages_with_plan_ids = []
+    for msg in messages:
+        # 获取消息关联的计划ID列表
+        plan_ids = await chat_service.get_message_plan_ids(str(msg.id))
+        messages_with_plan_ids.append({
+            "id": str(msg.id),
+            "role": msg.role,
+            "content": msg.content,
+            "data_type": msg.data_type,
+            "structured_data": msg.structured_data,
+            "tool_calls": msg.tool_calls,
+            "plan_ids": plan_ids if plan_ids else None,
+            "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        })
+
     return {
         "session_id": session_id,
-        "messages": [
-            {
-                "id": str(msg.id),
-                "role": msg.role,
-                "content": msg.content,
-                "data_type": msg.data_type,
-                "structured_data": msg.structured_data,
-                "tool_calls": msg.tool_calls,
-                "created_at": msg.created_at.isoformat() if msg.created_at else None,
-            }
-            for msg in messages
-        ],
+        "messages": messages_with_plan_ids,
         "total": session.message_count,
     }
 

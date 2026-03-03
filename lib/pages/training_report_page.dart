@@ -313,7 +313,7 @@ class _TrainingReportPageState extends State<TrainingReportPage> {
       children: [
         Expanded(
           child: _buildMetricCard(
-            '${(widget.monthlyStats.totalMinutes / 60).toStringAsFixed(1)}',
+            (widget.monthlyStats.totalMinutes / 60).toStringAsFixed(1),
             '总时长(小时)',
             Icons.timer,
             const Color(0xFF2DD4BF),
@@ -322,7 +322,7 @@ class _TrainingReportPageState extends State<TrainingReportPage> {
         const SizedBox(width: 12),
         Expanded(
           child: _buildMetricCard(
-            '${widget.monthlyStats.avgDailyMinutes.toStringAsFixed(0)}',
+            widget.monthlyStats.avgDailyMinutes.toStringAsFixed(0),
             '日均(分钟)',
             Icons.trending_up,
             const Color(0xFF8B5CF6),

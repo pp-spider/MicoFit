@@ -2,7 +2,6 @@ import 'dart:convert';
 import '../services/http_client.dart';
 import '../models/chat_session.dart';
 import '../models/chat_message.dart';
-import '../models/agent_output.dart';
 
 /// 聊天会话 API 服务
 class ChatSessionApiService {
@@ -123,5 +122,72 @@ class ChatSessionApiService {
     if (!ApiHttpClient.isSuccess(response)) {
       throw Exception(ApiHttpClient.getErrorMessage(response));
     }
+  }
+
+  /// 创建生成的训练计划
+  Future<Map<String, dynamic>> createGeneratedPlan({
+    required String planId,
+    required String sessionId,
+    String? messageId,
+    required String title,
+    String? subtitle,
+    required int totalDuration,
+    required String scene,
+    required int rpe,
+    String? aiNote,
+    required List<Map<String, dynamic>> modules,
+    DateTime? generatedAt,
+  }) async {
+    final response = await _httpClient.post(
+      '/api/v1/chat-sessions/generated-plans',
+      body: jsonEncode({
+        'plan_id': planId,
+        'session_id': sessionId,
+        'message_id': messageId,
+        'title': title,
+        'subtitle': subtitle,
+        'total_duration': totalDuration,
+        'scene': scene,
+        'rpe': rpe,
+        'ai_note': aiNote,
+        'modules': modules,
+        'generated_at': generatedAt?.toIso8601String(),
+      }),
+    );
+
+    if (!ApiHttpClient.isSuccess(response)) {
+      throw Exception(ApiHttpClient.getErrorMessage(response));
+    }
+
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  /// 获取会话中生成的计划列表
+  Future<List<Map<String, dynamic>>> getSessionGeneratedPlans(String sessionId) async {
+    final response = await _httpClient.get('/api/v1/chat-sessions/sessions/$sessionId/generated-plans');
+
+    if (!ApiHttpClient.isSuccess(response)) {
+      throw Exception(ApiHttpClient.getErrorMessage(response));
+    }
+
+    final List<dynamic> data = jsonDecode(response.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  /// 更新计划响应状态
+  Future<Map<String, dynamic>> updateGeneratedPlanResponse(
+    String planDbId,
+    String responseStatus, // 'confirmed' or 'rejected'
+  ) async {
+    final response = await _httpClient.put(
+      '/api/v1/chat-sessions/generated-plans/$planDbId/response',
+      body: jsonEncode({'response_status': responseStatus}),
+    );
+
+    if (!ApiHttpClient.isSuccess(response)) {
+      throw Exception(ApiHttpClient.getErrorMessage(response));
+    }
+
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 }

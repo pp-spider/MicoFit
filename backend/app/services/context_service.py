@@ -158,7 +158,7 @@ class ContextService:
         summary = session.context_summary or ""
         if needs_summary:
             summary = await self.summarizer.summarize_messages(messages)
-            await self._update_session_summary(session_id, summary)
+            await self.update_session_summary(session_id, summary)
 
         # 构建返回的上下文
         recent_for_context = messages[-self.MAX_RECENT_MESSAGES:]
@@ -228,8 +228,8 @@ class ContextService:
             for msg in messages
         ]
 
-    async def _update_session_summary(self, session_id: str, summary: str):
-        """更新会话摘要"""
+    async def update_session_summary(self, session_id: str, summary: str):
+        """更新会话摘要（公共方法）"""
         result = await self.db.execute(
             select(ChatSession).where(ChatSession.id == session_id)
         )
@@ -253,7 +253,7 @@ class ContextService:
         if session.message_count > 0 and session.message_count % 20 == 0:
             messages = await self._get_recent_messages(session_id)
             summary = await self.summarizer.summarize_messages(messages)
-            await self._update_session_summary(session_id, summary)
+            await self.update_session_summary(session_id, summary)
 
     async def generate_session_title(
         self,

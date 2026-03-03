@@ -12,6 +12,9 @@ from app.schemas.chat import (
     ChatMessageSchema,
     ChatSessionCreateRequest,
     ChatSessionRenameRequest,
+    ChatGeneratedPlanCreate,
+    ChatGeneratedPlanResponse,
+    ChatGeneratedPlanUpdate,
 )
 from pydantic import BaseModel
 
@@ -131,18 +134,26 @@ async def get_session_messages(
         offset=offset,
     )
 
-    return [
-        ChatMessageSchema(
-            id=str(m.id),
-            role=m.role,
-            content=m.content,
-            structured_data=m.structured_data,
-            data_type=m.data_type,
-            agent_outputs=m.agent_outputs,
-            created_at=m.created_at,
+    # 构建消息列表，包含关联的计划ID
+    result = []
+    for m in messages:
+        # 获取消息关联的计划ID列表
+        plan_ids = await service.get_message_plan_ids(str(m.id))
+
+        result.append(
+            ChatMessageSchema(
+                id=str(m.id),
+                role=m.role,
+                content=m.content,
+                structured_data=m.structured_data,
+                data_type=m.data_type,
+                agent_outputs=m.agent_outputs,
+                plan_ids=plan_ids if plan_ids else None,
+                created_at=m.created_at,
+            )
         )
-        for m in messages
-    ]
+
+    return result
 
 
 @router.post("", response_model=ChatSessionSchema, status_code=status.HTTP_201_CREATED)
@@ -373,3 +384,89 @@ async def update_message_agent_outputs(
         agent_outputs=message.agent_outputs,
         created_at=message.created_at,
     )
+
+
+@router.post("/generated-plans", response_model=ChatGeneratedPlanResponse)
+async def create_generated_plan(
+    data: ChatGeneratedPlanCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    创建生成的训练计划
+
+    在AI流式生成训练计划时调用，将计划持久化到数据库
+
+    Args:
+        data: 计划数据
+
+    Returns:
+        ChatGeneratedPlanResponse: 创建的计划
+    """
+    service = ChatService(db)
+
+    # 验证会话归属
+    session = await service.get_session(data.session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    plan = await service.create_generated_plan(str(current_user.id), data)
+    return plan
+
+
+@router.get("/sessions/{session_id}/generated-plans", response_model=List[ChatGeneratedPlanResponse])
+async def get_session_generated_plans(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取会话中生成的所有计划
+
+    Args:
+        session_id: 会话ID
+
+    Returns:
+        List[ChatGeneratedPlanResponse]: 计划列表
+    """
+    service = ChatService(db)
+
+    # 验证会话归属
+    session = await service.get_session(session_id)
+    if not session or str(session.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或无权访问"
+        )
+
+    plans = await service.get_session_generated_plans(str(current_user.id), session_id)
+    return plans
+
+
+@router.put("/generated-plans/{plan_db_id}/response", response_model=ChatGeneratedPlanResponse)
+async def update_generated_plan_response(
+    plan_db_id: str,
+    data: ChatGeneratedPlanUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    更新计划响应状态
+
+    用户确认或拒绝计划时调用
+
+    Args:
+        plan_db_id: 计划在数据库中的ID
+        data: 包含 response_status (confirmed/rejected)
+
+    Returns:
+        ChatGeneratedPlanResponse: 更新后的计划
+    """
+    service = ChatService(db)
+    plan = await service.update_generated_plan_response(
+        str(current_user.id), plan_db_id, data.response_status
+    )
+    return plan

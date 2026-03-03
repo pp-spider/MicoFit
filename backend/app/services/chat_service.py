@@ -5,7 +5,9 @@ from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 
-from app.models.chat_session import ChatSession, ChatMessage
+from app.models.chat_session import ChatSession, ChatMessage, ChatGeneratedPlan
+from app.schemas.chat import ChatGeneratedPlanCreate
+from fastapi import HTTPException
 
 
 class ChatService:
@@ -198,3 +200,168 @@ class ChatService:
             await self.db.refresh(message)
 
         return message
+
+    async def update_message(
+        self,
+        message_id: str,
+        content: str,
+        structured_data: dict | None = None,
+        data_type: str | None = None
+    ) -> ChatMessage | None:
+        """更新消息内容和结构化数据"""
+        result = await self.db.execute(
+            select(ChatMessage).where(ChatMessage.id == message_id)
+        )
+        message = result.scalar_one_or_none()
+
+        if message:
+            message.content = content
+            if structured_data is not None:
+                message.structured_data = structured_data
+            if data_type is not None:
+                message.data_type = data_type
+            await self.db.commit()
+            await self.db.refresh(message)
+
+        return message
+
+    async def create_generated_plan(self, user_id: str, data: ChatGeneratedPlanCreate) -> ChatGeneratedPlan:
+        """
+        创建生成的训练计划
+
+        Args:
+            user_id: 用户ID
+            data: 计划数据
+
+        Returns:
+            ChatGeneratedPlan: 创建的计划
+        """
+        plan = ChatGeneratedPlan(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            session_id=data.session_id,
+            message_id=data.message_id,
+            plan_id=data.plan_id,
+            title=data.title,
+            subtitle=data.subtitle,
+            total_duration=data.total_duration,
+            scene=data.scene,
+            rpe=data.rpe,
+            ai_note=data.ai_note,
+            modules=data.modules,
+            response_status="pending",
+            generated_at=data.generated_at or datetime.utcnow(),
+        )
+        self.db.add(plan)
+        await self.db.commit()
+        await self.db.refresh(plan)
+        return plan
+
+    async def get_session_generated_plans(self, user_id: str, session_id: str) -> List[ChatGeneratedPlan]:
+        """
+        获取会话中生成的所有计划
+
+        Args:
+            user_id: 用户ID
+            session_id: 会话ID
+
+        Returns:
+            List[ChatGeneratedPlan]: 计划列表
+        """
+        from sqlalchemy import and_
+        result = await self.db.execute(
+            select(ChatGeneratedPlan)
+            .where(
+                and_(
+                    ChatGeneratedPlan.user_id == user_id,
+                    ChatGeneratedPlan.session_id == session_id,
+                )
+            )
+            .order_by(desc(ChatGeneratedPlan.generated_at))
+        )
+        return result.scalars().all()
+
+    async def update_generated_plan_response(
+        self, user_id: str, plan_db_id: str, response_status: str
+    ) -> ChatGeneratedPlan:
+        """
+        更新计划响应状态
+
+        Args:
+            user_id: 用户ID
+            plan_db_id: 计划在数据库中的ID
+            response_status: 响应状态 (confirmed/rejected)
+
+        Returns:
+            ChatGeneratedPlan: 更新后的计划
+
+        Raises:
+            HTTPException: 计划不存在时抛出404错误
+        """
+        from sqlalchemy import and_
+        result = await self.db.execute(
+            select(ChatGeneratedPlan).where(
+                and_(
+                    ChatGeneratedPlan.id == plan_db_id,
+                    ChatGeneratedPlan.user_id == user_id,
+                )
+            )
+        )
+        plan = result.scalar_one_or_none()
+        if not plan:
+            raise HTTPException(status_code=404, detail="计划不存在")
+
+        plan.response_status = response_status
+        plan.responded_at = datetime.utcnow()
+        await self.db.commit()
+        await self.db.refresh(plan)
+        return plan
+
+    async def link_applied_plan(self, user_id: str, plan_db_id: str, workout_plan_id: str) -> ChatGeneratedPlan | None:
+        """
+        关联已应用的计划
+
+        当用户确认计划并将其应用到workout_plans表时调用
+
+        Args:
+            user_id: 用户ID
+            plan_db_id: 生成的计划ID
+            workout_plan_id: 应用后的workout_plan ID
+
+        Returns:
+            ChatGeneratedPlan: 更新后的计划，如果不存在则返回None
+        """
+        from sqlalchemy import and_
+        result = await self.db.execute(
+            select(ChatGeneratedPlan).where(
+                and_(
+                    ChatGeneratedPlan.id == plan_db_id,
+                    ChatGeneratedPlan.user_id == user_id,
+                )
+            )
+        )
+        plan = result.scalar_one_or_none()
+        if plan:
+            plan.applied_plan_id = workout_plan_id
+            plan.response_status = "confirmed"
+            plan.responded_at = datetime.utcnow()
+            await self.db.commit()
+            await self.db.refresh(plan)
+        return plan
+
+    async def get_message_plan_ids(self, message_id: str) -> List[str]:
+        """
+        获取消息关联的训练计划ID列表
+
+        Args:
+            message_id: 消息ID
+
+        Returns:
+            List[str]: 计划ID列表（plan_id 字段，不是数据库自增ID）
+        """
+        result = await self.db.execute(
+            select(ChatGeneratedPlan.plan_id)
+            .where(ChatGeneratedPlan.message_id == message_id)
+            .order_by(ChatGeneratedPlan.generated_at)
+        )
+        return [row[0] for row in result.all()]

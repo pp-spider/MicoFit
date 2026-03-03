@@ -12,6 +12,7 @@ class ChatMessageSchema(BaseModel):
     structured_data: Optional[dict] = None
     data_type: Optional[str] = None
     agent_outputs: Optional[list] = None
+    plan_ids: Optional[List[str]] = Field(default=None, description="关联的训练计划ID列表")
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -72,3 +73,45 @@ class ChatSessionsResponse(BaseModel):
     """会话列表响应"""
     sessions: List[ChatSessionSchema]
     total: int
+
+
+class ChatGeneratedPlanCreate(BaseModel):
+    """创建生成的训练计划请求"""
+    plan_id: str
+    session_id: str
+    message_id: Optional[str] = None
+    title: str
+    subtitle: Optional[str] = None
+    total_duration: int
+    scene: str
+    rpe: int
+    ai_note: Optional[str] = None
+    modules: List[dict]
+    generated_at: Optional[datetime] = None
+
+
+class ChatGeneratedPlanResponse(BaseModel):
+    """生成的训练计划响应"""
+    id: str
+    plan_id: str
+    session_id: str
+    title: str
+    subtitle: Optional[str] = None
+    total_duration: int
+    scene: str
+    rpe: int
+    ai_note: Optional[str] = None
+    modules: List[dict]
+    response_status: str
+    applied_plan_id: Optional[str] = None
+    generated_at: datetime
+    responded_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ChatGeneratedPlanUpdate(BaseModel):
+    """更新计划响应状态"""
+    response_status: str  # confirmed/rejected
