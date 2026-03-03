@@ -73,6 +73,11 @@ class WorkoutService:
                 existing_plan.is_applied = is_applied
                 existing_plan.is_completed = False  # 重置完成状态
                 existing_plan.feedback_id = None  # 清除关联的反馈
+
+                # 如果设置为已应用，取消该用户其他计划的已应用状态
+                if is_applied:
+                    await self._clear_other_applied_plans(user_id, existing_plan.id, plan_date)
+
                 await self.db.commit()
                 await self.db.refresh(existing_plan)
                 return existing_plan
@@ -93,10 +98,40 @@ class WorkoutService:
         )
 
         self.db.add(plan)
+        await self.db.flush()  # 先刷新以获取ID
+
+        # 如果设置为已应用，取消该用户其他计划的已应用状态
+        if is_applied:
+            await self._clear_other_applied_plans(user_id, plan.id, plan_date)
+
         await self.db.commit()
         await self.db.refresh(plan)
 
         return plan
+
+    async def _clear_other_applied_plans(
+        self,
+        user_id: str,
+        current_plan_id: str,
+        plan_date: date
+    ) -> None:
+        """
+        清除该用户在同一天其他计划的已应用状态
+
+        确保同一天只有一个计划的 is_applied=true
+        """
+        await self.db.execute(
+            update(WorkoutPlan)
+            .where(
+                and_(
+                    WorkoutPlan.user_id == user_id,
+                    WorkoutPlan.plan_date == plan_date,
+                    WorkoutPlan.id != current_plan_id,
+                    WorkoutPlan.is_applied == True
+                )
+            )
+            .values(is_applied=False)
+        )
 
     async def get_plan_by_id(self, plan_id: str) -> WorkoutPlan | None:
         """根据ID获取计划"""
@@ -106,8 +141,8 @@ class WorkoutService:
         return result.scalar_one_or_none()
 
     async def get_today_plan(self, user_id: str) -> WorkoutPlan | None:
-        """获取今日计划（优先返回已应用的）"""
-        # 先查询已应用的今日计划
+        """获取今日计划（优先返回已应用的 is_applied=true）"""
+        # 1. 先查询已应用的今日计划
         result = await self.db.execute(
             select(WorkoutPlan)
             .where(
@@ -122,7 +157,7 @@ class WorkoutService:
         if plan:
             return plan
 
-        # 如果没有，返回最新的今日计划
+        # 2. 如果没有已应用的，返回最新的今日计划
         result = await self.db.execute(
             select(WorkoutPlan)
             .where(

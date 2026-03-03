@@ -209,11 +209,12 @@ class ContextService:
         limit: int = 100
     ) -> List[Dict[str, Any]]:
         """获取最近的消息"""
+        from sqlalchemy import asc
         result = await self.db.execute(
             select(ChatMessage)
             .where(ChatMessage.session_id == session_id)
             .where(ChatMessage.role.in_(["user", "assistant"]))
-            .order_by(ChatMessage.created_at)
+            .order_by(asc(ChatMessage.created_at), asc(ChatMessage.id))  # 先按时间，再按ID确保稳定顺序
             .limit(limit)
         )
         messages = result.scalars().all()
@@ -474,10 +475,11 @@ class ContextService:
             }
 
         # 获取消息统计
+        from sqlalchemy import asc
         messages_result = await self.db.execute(
             select(ChatMessage)
             .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at)
+            .order_by(asc(ChatMessage.created_at), asc(ChatMessage.id))  # 先按时间，再按ID确保稳定顺序
         )
         messages = messages_result.scalars().all()
 
@@ -565,6 +567,7 @@ class ContextService:
         Returns:
             Dict 包含提取的关键信息
         """
+        from sqlalchemy import asc
         messages_result = await self.db.execute(
             select(ChatMessage)
             .where(
@@ -573,7 +576,7 @@ class ContextService:
                     ChatMessage.role.in_(["user", "assistant"])
                 )
             )
-            .order_by(ChatMessage.created_at)
+            .order_by(asc(ChatMessage.created_at), asc(ChatMessage.id))  # 先按时间，再按ID确保稳定顺序
         )
         messages = messages_result.scalars().all()
 

@@ -31,7 +31,7 @@ class ChatSession(Base):
 
     # 关联
     user = relationship("User", back_populates="chat_sessions")
-    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan", order_by="ChatMessage.created_at")
+    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan", order_by="ChatMessage.created_at,ChatMessage.id")
     generated_plans = relationship("ChatGeneratedPlan", back_populates="session", cascade="all, delete-orphan")
 
     def __repr__(self):
@@ -88,7 +88,6 @@ class ChatGeneratedPlan(Base):
     session_id = Column(CHAR(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     message_id = Column(CHAR(36), ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
 
-    plan_id = Column(String(50), nullable=False)  # 前端生成的计划ID
     title = Column(String(100), nullable=False)
     subtitle = Column(String(200), nullable=True)
     total_duration = Column(Integer, nullable=False)
@@ -98,7 +97,7 @@ class ChatGeneratedPlan(Base):
     modules = Column(JSON, nullable=False)
 
     response_status = Column(String(20), default="pending")  # pending/confirmed/rejected
-    applied_plan_id = Column(CHAR(36), ForeignKey("workout_plans.id", ondelete="SET NULL"), nullable=True)
+    applied_plan_id = Column(CHAR(36), ForeignKey("workout_plans.id", ondelete="SET NULL"), nullable=True)  # 关联的 workout_plan ID
 
     generated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     responded_at = Column(DateTime, nullable=True)
@@ -109,7 +108,7 @@ class ChatGeneratedPlan(Base):
     user = relationship("User", back_populates="generated_plans")
     session = relationship("ChatSession", back_populates="generated_plans")
     message = relationship("ChatMessage", back_populates="generated_plans")
-    applied_plan = relationship("WorkoutPlan")
+    applied_plan = relationship("WorkoutPlan", foreign_keys=[applied_plan_id])
 
     def __repr__(self):
-        return f"<ChatGeneratedPlan(id={self.id}, plan_id={self.plan_id}, session_id={self.session_id}, status={self.response_status})>"
+        return f"<ChatGeneratedPlan(id={self.id}, message_id={self.message_id}, session_id={self.session_id}, status={self.response_status})>"

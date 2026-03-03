@@ -456,7 +456,8 @@ async def update_generated_plan_response(
     """
     更新计划响应状态
 
-    用户确认或拒绝计划时调用
+    用户确认或拒绝计划时调用。当用户确认计划时，
+    直接将计划添加到 workout_plans 表中。
 
     Args:
         plan_db_id: 计划在数据库中的ID
@@ -465,8 +466,72 @@ async def update_generated_plan_response(
     Returns:
         ChatGeneratedPlanResponse: 更新后的计划
     """
-    service = ChatService(db)
-    plan = await service.update_generated_plan_response(
+    from datetime import date
+    from app.services.workout_service import WorkoutService
+    from sqlalchemy import select
+    from app.models.chat_session import ChatGeneratedPlan
+
+    chat_service = ChatService(db)
+    workout_service = WorkoutService(db)
+
+    # 如果用户确认计划，先创建 workout_plan 记录
+    applied_plan_id = None
+    if data.response_status == "confirmed":
+        # 获取生成的计划详情
+        result = await db.execute(
+            select(ChatGeneratedPlan).where(
+                ChatGeneratedPlan.id == plan_db_id,
+                ChatGeneratedPlan.user_id == str(current_user.id)
+            )
+        )
+        generated_plan = result.scalar_one_or_none()
+
+        if not generated_plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="计划不存在或无权访问"
+            )
+
+        # 创建 workout_plan 记录
+        workout_plan = await workout_service.create_plan(
+            user_id=str(current_user.id),
+            plan_date=date.today(),
+            title=generated_plan.title,
+            subtitle=generated_plan.subtitle or "",
+            total_duration=generated_plan.total_duration,
+            scene=generated_plan.scene,
+            rpe=generated_plan.rpe,
+            modules=generated_plan.modules,
+            ai_note=generated_plan.ai_note,
+            is_applied=True,
+        )
+        applied_plan_id = str(workout_plan.id)
+
+        # 更新 generated_plan 的 applied_plan_id
+        generated_plan.applied_plan_id = applied_plan_id
+        await db.commit()
+
+    # 更新响应状态
+    plan = await chat_service.update_generated_plan_response(
         str(current_user.id), plan_db_id, data.response_status
     )
-    return plan
+
+    # 返回包含 applied_plan_id 的响应
+    return ChatGeneratedPlanResponse(
+        id=str(plan.id),
+        session_id=plan.session_id,
+        message_id=plan.message_id,
+        title=plan.title,
+        subtitle=plan.subtitle,
+        total_duration=plan.total_duration,
+        scene=plan.scene,
+        rpe=plan.rpe,
+        ai_note=plan.ai_note,
+        modules=plan.modules,
+        response_status=plan.response_status,
+        applied_plan_id=applied_plan_id,
+        generated_at=plan.generated_at,
+        responded_at=plan.responded_at,
+        created_at=plan.created_at,
+        updated_at=plan.updated_at,
+    )

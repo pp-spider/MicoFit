@@ -165,10 +165,11 @@ class ChatService:
         offset: int = 0
     ) -> List[ChatMessage]:
         """获取会话的消息列表"""
+        from sqlalchemy import asc
         result = await self.db.execute(
             select(ChatMessage)
             .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at)
+            .order_by(asc(ChatMessage.created_at), asc(ChatMessage.id))  # 先按时间，再按ID确保稳定顺序
             .offset(offset)
             .limit(limit)
         )
@@ -241,7 +242,6 @@ class ChatService:
             user_id=user_id,
             session_id=data.session_id,
             message_id=data.message_id,
-            plan_id=data.plan_id,
             title=data.title,
             subtitle=data.subtitle,
             total_duration=data.total_duration,
@@ -317,50 +317,18 @@ class ChatService:
         await self.db.refresh(plan)
         return plan
 
-    async def link_applied_plan(self, user_id: str, plan_db_id: str, workout_plan_id: str) -> ChatGeneratedPlan | None:
-        """
-        关联已应用的计划
-
-        当用户确认计划并将其应用到workout_plans表时调用
-
-        Args:
-            user_id: 用户ID
-            plan_db_id: 生成的计划ID
-            workout_plan_id: 应用后的workout_plan ID
-
-        Returns:
-            ChatGeneratedPlan: 更新后的计划，如果不存在则返回None
-        """
-        from sqlalchemy import and_
-        result = await self.db.execute(
-            select(ChatGeneratedPlan).where(
-                and_(
-                    ChatGeneratedPlan.id == plan_db_id,
-                    ChatGeneratedPlan.user_id == user_id,
-                )
-            )
-        )
-        plan = result.scalar_one_or_none()
-        if plan:
-            plan.applied_plan_id = workout_plan_id
-            plan.response_status = "confirmed"
-            plan.responded_at = datetime.utcnow()
-            await self.db.commit()
-            await self.db.refresh(plan)
-        return plan
-
     async def get_message_plan_ids(self, message_id: str) -> List[str]:
         """
-        获取消息关联的训练计划ID列表
+        获取消息关联的训练计划数据库ID列表
 
         Args:
             message_id: 消息ID
 
         Returns:
-            List[str]: 计划ID列表（plan_id 字段，不是数据库自增ID）
+            List[str]: 计划数据库ID列表（id 字段）
         """
         result = await self.db.execute(
-            select(ChatGeneratedPlan.plan_id)
+            select(ChatGeneratedPlan.id)
             .where(ChatGeneratedPlan.message_id == message_id)
             .order_by(ChatGeneratedPlan.generated_at)
         )

@@ -77,7 +77,6 @@ class ChatSessionsResponse(BaseModel):
 
 class ChatGeneratedPlanCreate(BaseModel):
     """创建生成的训练计划请求"""
-    plan_id: str
     session_id: str
     message_id: Optional[str] = None
     title: str
@@ -93,8 +92,8 @@ class ChatGeneratedPlanCreate(BaseModel):
 class ChatGeneratedPlanResponse(BaseModel):
     """生成的训练计划响应"""
     id: str
-    plan_id: str
     session_id: str
+    message_id: Optional[str] = None
     title: str
     subtitle: Optional[str] = None
     total_duration: int
@@ -103,7 +102,7 @@ class ChatGeneratedPlanResponse(BaseModel):
     ai_note: Optional[str] = None
     modules: List[dict]
     response_status: str
-    applied_plan_id: Optional[str] = None
+    applied_plan_id: Optional[str] = None  # 关联的 workout_plan ID
     generated_at: datetime
     responded_at: Optional[datetime] = None
     created_at: datetime

@@ -22,15 +22,15 @@ class WorkoutProvider extends ChangeNotifier {
   bool get hasWorkout => _todayWorkout != null;
 
   /// 加载今日训练计划
-  /// 优先从后端获取最新的训练计划，如果后端没有则使用本地生成
+  /// 优先从后端获取已应用的今日训练计划（is_applied=true），如果后端没有则使用本地生成
   Future<void> loadTodayWorkout() async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      // 1. 优先从后端获取最新的训练计划
-      final backendPlan = await _apiService.getLatestPlan();
+      // 1. 优先从后端获取已应用的今日训练计划
+      final backendPlan = await _apiService.getTodayPlan();
       if (backendPlan != null) {
         _todayWorkout = backendPlan;
         // 同时缓存到本地

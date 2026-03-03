@@ -126,7 +126,6 @@ class ChatSessionApiService {
 
   /// 创建生成的训练计划
   Future<Map<String, dynamic>> createGeneratedPlan({
-    required String planId,
     required String sessionId,
     String? messageId,
     required String title,
@@ -141,7 +140,6 @@ class ChatSessionApiService {
     final response = await _httpClient.post(
       '/api/v1/chat-sessions/generated-plans',
       body: jsonEncode({
-        'plan_id': planId,
         'session_id': sessionId,
         'message_id': messageId,
         'title': title,

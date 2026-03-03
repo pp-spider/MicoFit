@@ -19,6 +19,7 @@ from app.services.chat_service import ChatService
 from app.services.user_service import UserService
 from app.services.context_service import ContextService
 from app.models.workout_plan import WorkoutPlan as WorkoutPlanModel
+from app.schemas.chat import ChatGeneratedPlanCreate
 
 
 class AIService:
@@ -179,32 +180,32 @@ class AIService:
                 yield chunk
             elif chunk["type"] == "plan":
                 plan_data = chunk["plan"]
-                # 保存计划到数据库
+                # 保存计划到 chat_generated_plans 表（用户确认后再转移到 workout_plans）
                 try:
-                    # 如果已经有计划，强制创建新记录（多计划场景）
-                    force_create = len(workout_plans) > 0
-                    plan_record = await self.workout_service.create_plan(
-                        user_id=user_id,
-                        plan_date=date.today(),
+                    plan_create = ChatGeneratedPlanCreate(
+                        session_id=session_id,
+                        message_id=message_id,
                         title=plan_data["title"],
                         subtitle=plan_data.get("subtitle", ""),
                         total_duration=plan_data["total_duration"],
                         scene=plan_data["scene"],
                         rpe=plan_data["rpe"],
-                        modules=plan_data["modules"],
                         ai_note=plan_data.get("ai_note"),
-                        is_applied=False,
-                        force_create=force_create
+                        modules=plan_data["modules"],
+                    )
+                    plan_record = await self.chat_service.create_generated_plan(
+                        user_id=user_id,
+                        data=plan_create
                     )
                     # 将数据库ID添加到计划数据中
                     plan_data["id"] = str(plan_record.id)
                     # 添加到计划列表
                     workout_plans.append(plan_data)
-                    logger.info(f"[AIService] 保存计划 {len(workout_plans)}: {plan_data['title']}, id={plan_record.id}")
+                    logger.info(f"[AIService] 保存计划到 chat_generated_plans {len(workout_plans)}: {plan_data['title']}, id={plan_record.id}")
                     yield {
                         "type": "plan",
                         "plan": plan_data,
-                        "plan_id": str(plan_record.id),
+                        "plan_id": str(plan_record.id),  # 这是 chat_generated_plans 的 ID
                         "plan_index": len(workout_plans) - 1,  # 计划索引
                         "total_plans": len(workout_plans),  # 总计划数
                         "message_id": message_id  # 关联的消息ID
@@ -349,19 +350,22 @@ class AIService:
                 yield chunk
             elif chunk["type"] == "plan":
                 plan_data = chunk["plan"]
-                # 保存计划到数据库
+                # 保存计划到 chat_generated_plans 表（用户确认后再转移到 workout_plans）
                 try:
-                    plan_record = await self.workout_service.create_plan(
-                        user_id=user_id,
-                        plan_date=date.today(),
+                    plan_create = ChatGeneratedPlanCreate(
+                        session_id=session_id,
+                        message_id=None,  # continue 模式下没有预先创建的消息
                         title=plan_data["title"],
                         subtitle=plan_data.get("subtitle", ""),
                         total_duration=plan_data["total_duration"],
                         scene=plan_data["scene"],
                         rpe=plan_data["rpe"],
-                        modules=plan_data["modules"],
                         ai_note=plan_data.get("ai_note"),
-                        is_applied=False
+                        modules=plan_data["modules"],
+                    )
+                    plan_record = await self.chat_service.create_generated_plan(
+                        user_id=user_id,
+                        data=plan_create
                     )
                     plan_data["id"] = str(plan_record.id)
                     # 添加到计划列表
@@ -369,7 +373,7 @@ class AIService:
                     yield {
                         "type": "plan",
                         "plan": plan_data,
-                        "plan_id": str(plan_record.id),
+                        "plan_id": str(plan_record.id),  # 这是 chat_generated_plans 的 ID
                         "plan_index": len(workout_plans) - 1,
                         "total_plans": len(workout_plans)
                     }
@@ -583,7 +587,7 @@ class AIService:
         plan_date: date | None = None,
     ) -> dict | None:
         """
-        获取今日计划（返回用户最新的训练计划，如果没有今天的则返回最近创建的）
+        获取今日计划（优先返回已应用的计划 is_applied=true）
 
         Args:
             user_id: 用户ID
@@ -592,21 +596,40 @@ class AIService:
         Returns:
             dict | None: 计划数据
         """
+        from sqlalchemy import and_
+
         target_date = plan_date if plan_date else date.today()
 
-        # 先查询指定日期的计划
+        # 1. 优先查询指定日期已应用的计划
         result = await self.db.execute(
             select(WorkoutPlanModel)
             .where(
-                WorkoutPlanModel.user_id == user_id,
-                WorkoutPlanModel.plan_date == target_date
+                and_(
+                    WorkoutPlanModel.user_id == user_id,
+                    WorkoutPlanModel.plan_date == target_date,
+                    WorkoutPlanModel.is_applied == True
+                )
             )
-            .order_by(desc(WorkoutPlanModel.created_at))
             .limit(1)
         )
         plan = result.scalar_one_or_none()
 
-        # 如果没有找到指定日期的计划，查询用户最新的任意一天的计划
+        # 2. 如果没有已应用的计划，查询指定日期最新的计划
+        if not plan:
+            result = await self.db.execute(
+                select(WorkoutPlanModel)
+                .where(
+                    and_(
+                        WorkoutPlanModel.user_id == user_id,
+                        WorkoutPlanModel.plan_date == target_date
+                    )
+                )
+                .order_by(desc(WorkoutPlanModel.created_at))
+                .limit(1)
+            )
+            plan = result.scalar_one_or_none()
+
+        # 3. 如果没有找到指定日期的计划，查询用户最新的任意一天的计划
         if not plan:
             result = await self.db.execute(
                 select(WorkoutPlanModel)

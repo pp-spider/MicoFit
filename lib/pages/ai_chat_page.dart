@@ -792,6 +792,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
       return true;
     }).toList();
 
+    // 按时间戳排序，确保消息顺序正确（老消息在前，新消息在后）
+    displayMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
     // 构建消息列表项
     final List<Widget> messageWidgets = [];
 
@@ -941,15 +944,13 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     final messagePlans = chatProvider.getPlansForMessage(message.id);
 
     // 检查是否包含健身计划
-    // 如果计划未响应，只在最后一条消息显示；如果已响应，始终显示（变灰状态）
+    // 只要消息有计划就显示，响应状态只影响按钮的可用性
     // 支持多计划场景
     final isPlanMessage =
         !isUser &&
         message.dataType == ChatMessageDataType.workoutPlan &&
         messagePlans.isNotEmpty;
-    final hasWorkoutPlan =
-        isPlanMessage &&
-        (chatProvider.isPlanResponded || index == messages.length - 1);
+    final hasWorkoutPlan = isPlanMessage;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -1014,7 +1015,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                       ? _buildWorkoutPlanPreview(
                           messagePlans.first,
                           chatProvider,
-                          chatProvider.isPlanResponded,
+                          chatProvider.isPlanRespondedById(messagePlans.first.id),
                           message.id,
                         )
                       : _buildMultipleWorkoutPlansPreview(
@@ -1243,10 +1244,10 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     WorkoutPlan plan,
     ChatProvider chatProvider,
     bool isResponded,
-    String planId,
+    String messageId,
   ) {
-    final isConfirmed = chatProvider.isPlanConfirmed;
-    final isExpanded = _expandedPlanCards.contains(planId);
+    final isConfirmed = chatProvider.isPlanConfirmedById(plan.id);
+    final isExpanded = _expandedPlanCards.contains(messageId);
 
     return Container(
       margin: const EdgeInsets.only(top: 12),
@@ -1271,9 +1272,9 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
             onTap: () {
               setState(() {
                 if (isExpanded) {
-                  _expandedPlanCards.remove(planId);
+                  _expandedPlanCards.remove(messageId);
                 } else {
-                  _expandedPlanCards.add(planId);
+                  _expandedPlanCards.add(messageId);
                 }
               });
             },
@@ -1330,7 +1331,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                   }),
                   const SizedBox(height: 16),
                   if (!isResponded)
-                    _buildActionButtons(plan, chatProvider)
+                    _buildActionButtons(plan, chatProvider, messageId)
                   else
                     _buildResponseStatus(isConfirmed),
                 ],
@@ -1442,6 +1443,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                   chatProvider,
                   isResponded,
                   planKey,
+                  messageId,
                 ),
               ],
             ),
@@ -1457,6 +1459,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     ChatProvider chatProvider,
     bool isResponded,
     String planKey,
+    String messageId,
   ) {
     final isExpanded = _expandedPlanCards.contains(planKey);
     final isConfirmed = chatProvider.isPlanConfirmedById(plan.id);
@@ -1528,7 +1531,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                 }),
                 const SizedBox(height: 16),
                 if (!isResponded)
-                  _buildMultiPlanActionButtons(plan, chatProvider)
+                  _buildMultiPlanActionButtons(plan, chatProvider, messageId)
                 else
                   _buildResponseStatus(isConfirmed),
               ],
@@ -1544,16 +1547,17 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
     );
   }
 
-  /// 多计划场景的操作按钮（带计划ID）
+  /// 多计划场景的操作按钮（带计划ID和messageId）
   Widget _buildMultiPlanActionButtons(
     WorkoutPlan plan,
     ChatProvider chatProvider,
+    String messageId,
   ) {
     return Row(
       children: [
         Expanded(
           child: OutlinedButton(
-            onPressed: () => chatProvider.rejectWorkoutPlanById(plan.id),
+            onPressed: () => chatProvider.rejectWorkoutPlanById(plan.id, messageId: messageId),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.grey[600],
               side: BorderSide(color: Colors.grey[300]!),
@@ -1570,7 +1574,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
           child: ElevatedButton(
             onPressed: chatProvider.isApplyingPlan
                 ? null
-                : () => chatProvider.applyWorkoutPlan(plan),
+                : () => chatProvider.applyWorkoutPlan(plan, messageId: messageId),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2DD4BF),
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1925,7 +1929,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   }
 
   /// 操作按钮
-  Widget _buildActionButtons(WorkoutPlan plan, ChatProvider chatProvider) {
+  Widget _buildActionButtons(WorkoutPlan plan, ChatProvider chatProvider, String messageId) {
     return Row(
       children: [
         Expanded(
@@ -1946,7 +1950,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
           child: ElevatedButton(
             onPressed: chatProvider.isApplyingPlan
                 ? null
-                : () => chatProvider.applyWorkoutPlan(plan),
+                : () => chatProvider.applyWorkoutPlan(plan, messageId: messageId),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2DD4BF),
               padding: const EdgeInsets.symmetric(vertical: 12),
