@@ -44,3 +44,11 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 nul
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+/backend/.env
+backend/.env
+backend/.env
