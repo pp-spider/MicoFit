@@ -57,23 +57,16 @@ class NetworkService {
       final isConnected = result.isNotEmpty && !result.contains(ConnectivityResult.none);
       final networkType = getConnectionLabel(result);
 
-      debugPrint('[NetworkService] [轮询] 检查网络状态: $networkType, 在线: $isConnected');
-
       // 检测到网络状态变化
       if (isConnected != _lastKnownConnected) {
         _lastKnownConnected = isConnected;
         _cachedResult = result;
 
-        debugPrint('[NetworkService] [轮询] 网络状态变化: ${isConnected ? "在线" : "离线"}');
-
         // 触发回调
         if (_onNetworkChangedCallback != null) {
-          debugPrint('[NetworkService] [轮询] 触发网络变化回调');
           _onNetworkChangedCallback!();
         }
-      } else {
-        debugPrint('[NetworkService] [轮询] 网络状态无变化');
-      }
+      } 
     } catch (e) {
       debugPrint('[NetworkService] [轮询] 检查网络状态失败: $e');
     }

@@ -172,6 +172,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 消息ID到计划ID列表的映射（实现消息与计划的一对多绑定）
   final Map<String, List<String>> _messagePlanIds = {};
 
+  /// 当前流式响应中生成的计划ID列表（用于区分本次生成 vs 历史遗留的计划）
+  final List<String> _currentStreamPlanIds = [];
+
   /// 当前会话ID
   String? _currentSessionId;
 
@@ -631,6 +634,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 开始流式生成
   Future<void> _startStreaming(String userMessage) async {
     try {
+      // 清空本次流式响应的计划ID列表，避免与历史计划混淆
+      _currentStreamPlanIds.clear();
+
       // 使用后端 SSE API
       final stream = _aiApiService.sendMessageStream(
         sessionId: _currentSessionId,
@@ -886,6 +892,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             debugPrint('[ChatProvider] plan.id: ${plan?.id}, plan.title: ${plan?.title}');
             if (plan != null) {
               receivedPlan = plan;
+              // 记录本次流式响应生成的计划ID（用于消息绑定）
+              if (!_currentStreamPlanIds.contains(plan.id)) {
+                _currentStreamPlanIds.add(plan.id);
+                debugPrint('[ChatProvider] 记录本次流式计划ID: ${plan.id}, 当前流式计划列表: $_currentStreamPlanIds');
+              }
               // 添加到计划列表（避免重复）
               final existingIndex = _pendingWorkoutPlans.indexWhere(
                 (p) => p.id == plan.id,
@@ -998,8 +1009,10 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
               })
           .toList();
 
-      // 收集当前批次生成的所有计划ID
-      final currentPlanIds = _pendingWorkoutPlans.map((p) => p.id).toList();
+      // 收集当前批次生成的所有计划ID（使用 _currentStreamPlanIds 确保只包含本次流式响应生成的计划）
+      final currentPlanIds = List<String>.from(_currentStreamPlanIds);
+      debugPrint('[ChatProvider] 流式完成，本次生成的计划IDs: $currentPlanIds');
+      debugPrint('[ChatProvider] _pendingWorkoutPlans 中所有计划IDs: ${_pendingWorkoutPlans.map((p) => p.id).toList()}');
 
       // 确定消息ID（优先使用后端返回的ID）
       final messageId = backendMessageId ?? DateTime.now().millisecondsSinceEpoch.toString();

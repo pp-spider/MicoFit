@@ -207,9 +207,18 @@ class ChatService:
         message_id: str,
         content: str,
         structured_data: dict | None = None,
-        data_type: str | None = None
+        data_type: str | None = None,
+        update_timestamp: bool = True
     ) -> ChatMessage | None:
-        """更新消息内容和结构化数据"""
+        """更新消息内容和结构化数据
+
+        Args:
+            message_id: 消息ID
+            content: 消息内容
+            structured_data: 结构化数据
+            data_type: 数据类型
+            update_timestamp: 是否更新时间戳（流式响应结束时设置为True）
+        """
         result = await self.db.execute(
             select(ChatMessage).where(ChatMessage.id == message_id)
         )
@@ -221,6 +230,9 @@ class ChatService:
                 message.structured_data = structured_data
             if data_type is not None:
                 message.data_type = data_type
+            # 流式响应结束时更新时间戳，确保created_at反映消息完成时间
+            if update_timestamp:
+                message.created_at = datetime.utcnow()
             await self.db.commit()
             await self.db.refresh(message)
 

@@ -154,11 +154,7 @@ class SyncManager {
   /// 同时检查网络状态和离线队列状态
   /// 同步触发条件：网络在线 AND 队列有数据
   Future<void> _checkAndSync() async {
-    debugPrint('[SyncManager] [轮询] ====================');
-    debugPrint('[SyncManager] [轮询] 开始检查 (网络 + 队列)...');
-
     if (_isSyncing) {
-      debugPrint('[SyncManager] [轮询] 同步进行中，跳过');
       return;
     }
 
@@ -167,7 +163,6 @@ class SyncManager {
 
       // 检查网络状态（使用异步方法实时检查，而不是缓存）
       final currentNetworkConnected = await _networkService.checkConnectivity();
-      debugPrint('[SyncManager] [轮询] 网络状态: ${currentNetworkConnected ? "在线" : "离线"}');
 
       // 检查队列状态
       final currentQueueLength = _offlineQueue.queueLength;
@@ -176,46 +171,36 @@ class SyncManager {
           .where((e) => e.value > 0)
           .map((e) => '${e.key}: ${e.value}')
           .join(', ');
-      debugPrint('[SyncManager] [轮询] 队列状态: $currentQueueLength 条 [$statsStr]');
 
       // 检测网络状态变化
       if (currentNetworkConnected != _lastKnownNetworkConnected) {
         _lastKnownNetworkConnected = currentNetworkConnected;
-        debugPrint('[SyncManager] [轮询] 网络状态变化: ${currentNetworkConnected ? "在线" : "离线"}');
       }
 
       // 检测队列变化
       if (currentQueueLength != _lastKnownQueueLength) {
         _lastKnownQueueLength = currentQueueLength;
-        debugPrint('[SyncManager] [轮询] 队列变化: $currentQueueLength 条 [$statsStr]');
       }
 
       // ========== 同步触发条件：网络在线 AND 服务器可达 AND 队列有数据 ==========
       if (!currentNetworkConnected) {
-        debugPrint('[SyncManager] [轮询] 跳过同步：网络离线 (WiFi/移动网络未连接)');
         return;
       }
 
       if (currentQueueLength == 0) {
-        debugPrint('[SyncManager] [轮询] 跳过同步：队列为空');
         return;
       }
 
       // 网络已连接且队列有数据，检查服务器可达性
-      debugPrint('[SyncManager] [轮询] 网络已连接，检查服务器可达性...');
       final isServerReachable = await _syncApiService.healthCheck();
-      debugPrint('[SyncManager] [轮询] 服务器可达性: $isServerReachable');
 
       if (!isServerReachable) {
-        debugPrint('[SyncManager] [轮询] 跳过同步：服务器不可达 (网络已连接但服务器无响应)');
         return;
       }
 
       // 所有条件满足，触发同步
-      debugPrint('[SyncManager] [轮询] 条件满足 (网络在线 + 服务器可达 + 队列有数据)，触发同步');
       await sync();
 
-      debugPrint('[SyncManager] [轮询] ====================');
     } catch (e) {
       debugPrint('[SyncManager] [轮询] 检查异常: $e');
     }
