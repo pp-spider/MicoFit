@@ -391,6 +391,8 @@ class TaskExecutor:
         task_id = task["id"]
         agent_name = task["agent_name"]
         task_type = task["type"]
+        intention_message = task['description']
+
 
         logger.info(f"开始执行任务: {task_id}, 类型: {task_type}, Agent: {agent_name}")
 
@@ -422,7 +424,7 @@ class TaskExecutor:
                 extracted_preferences = input_data.get("extracted_preferences", {})
 
                 state = {
-                    "messages": [],
+                    "messages": [intention_message],
                     "user_id": user_id,
                     "user_profile": user_profile,
                     "extracted_preferences": extracted_preferences,

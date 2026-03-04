@@ -109,7 +109,7 @@ class WorkoutSubAgent(BaseSubAgent):
         system_prompt = build_workout_system_prompt(user_profile)
 
         # 构建用户消息（包含提取的偏好）
-        user_msg_parts = ["请为我生成今天的训练计划"]
+        user_msg_parts = [state.get("messages")[-1]]
 
         if preferences:
             if preferences.get("focus_body_part"):
