@@ -4,84 +4,6 @@ from langchain_core.messages import BaseMessage
 import operator
 
 
-class WorkoutAgentState(TypedDict):
-    """训练计划生成Agent状态"""
-    messages: Annotated[Sequence[BaseMessage], operator.add]
-    user_id: str
-    user_profile: dict | None
-    workout_plan: dict | None
-    plan_json_str: str | None
-    validation_passed: bool
-    error_message: str | None
-    stream_chunks: list[str]
-
-
-class ChatAgentState(TypedDict):
-    """聊天Agent状态"""
-    messages: Annotated[Sequence[BaseMessage], operator.add]
-    user_id: str
-    session_id: str
-    user_profile: dict | None
-    stream_chunks: list[str]
-    has_workout_plan: bool
-    workout_plan: dict | None
-    error_message: str | None
-
-
-class FeedbackAgentState(TypedDict):
-    """反馈处理Agent状态"""
-    user_id: str
-    user_profile: dict | None
-    feedback: dict | None
-    last_workout: dict | None
-    adjustment_suggestion: str | None
-    next_plan_params: dict | None
-
-
-# ============================================================================
-# RouterAgent + SubAgent 架构新状态定义
-# ============================================================================
-
-class RouterState(TypedDict):
-    """
-    RouterAgent 状态定义 - 作为整个工作流的中央状态
-
-    包含：
-    - 原始输入信息
-    - 意图识别结果
-    - 路由决策
-    - SubAgent 执行结果
-    - 流式输出缓存
-    """
-    # ========== 输入信息 ==========
-    messages: Annotated[Sequence[BaseMessage], operator.add]
-    user_id: str
-    session_id: str
-    user_profile: dict | None
-    user_message: str                          # 当前用户消息
-    history: list[dict] | None                 # 历史消息
-    context_summary: str | None                # 会话摘要
-    recent_memories: list[str] | None          # 跨会话记忆
-
-    # ========== 意图识别结果 ==========
-    intent: str | None                         # "chat" | "workout" | "unknown"
-    intent_confidence: float                   # 意图置信度 (0-1)
-    intent_reasoning: str | None               # LLM 的推理过程
-    entities: dict | None                      # 提取的实体（如部位、场景等）
-
-    # ========== 路由决策 ==========
-    route_to: str | None                       # "chat_sub_agent" | "workout_sub_agent"
-
-    # ========== SubAgent 执行结果 ==========
-    sub_agent_result: dict | None              # SubAgent 返回的完整结果
-    stream_chunks: list[str]                   # 流式输出块
-    final_response: str | None                 # 最终响应内容
-
-    # ========== 错误处理 ==========
-    error_message: str | None
-    should_retry: bool
-
-
 class ChatSubAgentState(TypedDict):
     """
     ChatSubAgent 状态 - 专注于普通对话
@@ -125,11 +47,48 @@ class WorkoutSubAgentState(TypedDict):
     stream_chunks: list[str]
     error_message: str | None
 
+# RouterAgent + SubAgent 架构新状态定义
+class RouterState(TypedDict):
+    """
+    RouterAgent 状态定义 - 作为整个工作流的中央状态
 
-# ============================================================================
+    包含：
+    - 原始输入信息
+    - 意图识别结果
+    - 路由决策
+    - SubAgent 执行结果
+    - 流式输出缓存
+    """
+    # ========== 输入信息 ==========
+    messages: Annotated[Sequence[BaseMessage], operator.add]
+    user_id: str
+    session_id: str
+    user_profile: dict | None
+    user_message: str                          # 当前用户消息
+    history: list[dict] | None                 # 历史消息
+    context_summary: str | None                # 会话摘要
+    recent_memories: list[str] | None          # 跨会话记忆
+
+    # ========== 意图识别结果 ==========
+    intent: str | None                         # "chat" | "workout" | "unknown"
+    intent_confidence: float                   # 意图置信度 (0-1)
+    intent_reasoning: str | None               # LLM 的推理过程
+    entities: dict | None                      # 提取的实体（如部位、场景等）
+
+    # ========== 路由决策 ==========
+    route_to: str | None                       # "chat_sub_agent" | "workout_sub_agent"
+
+    # ========== SubAgent 执行结果 ==========
+    sub_agent_result: dict | None              # SubAgent 返回的完整结果
+    stream_chunks: list[str]                   # 流式输出块
+    final_response: str | None                 # 最终响应内容
+
+    # ========== 错误处理 ==========
+    error_message: str | None
+    should_retry: bool
+
+
 # Planner Agent 状态定义
-# ============================================================================
-
 class PlannerState(TypedDict):
     """
     PlannerAgent 状态 - Planner 架构全局状态

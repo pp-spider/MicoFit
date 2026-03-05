@@ -232,4 +232,33 @@ class ChatLocalService {
     await UserDataHelper.remove(_respondedPlansKey);
     await UserDataHelper.remove('${_respondedPlansKey}_status');
   }
+
+  // ========== messageId -> planDbId 映射持久化 ==========
+
+  static const String _messagePlanDbIdsKey = 'message_plan_db_ids';
+
+  /// 保存 messageId 到 planDbId 的映射
+  /// 用于在应用重启或切换会话后恢复 planDbId，确保可以调用后端 API 确认/拒绝计划
+  Future<void> saveMessagePlanDbIds(Map<String, String> messagePlanDbIds) async {
+    await UserDataHelper.setString(_messagePlanDbIdsKey, jsonEncode(messagePlanDbIds));
+  }
+
+  /// 加载 messageId 到 planDbId 的映射
+  Future<Map<String, String>> loadMessagePlanDbIds() async {
+    final json = await UserDataHelper.getString(_messagePlanDbIdsKey);
+    if (json == null) return {};
+
+    try {
+      final Map<String, dynamic> decoded = jsonDecode(json);
+      return decoded.map((key, value) => MapEntry(key, value as String));
+    } catch (e) {
+      debugPrint('加载 messageId -> planDbId 映射失败: $e');
+      return {};
+    }
+  }
+
+  /// 清除 messageId 到 planDbId 的映射
+  Future<void> clearMessagePlanDbIds() async {
+    await UserDataHelper.remove(_messagePlanDbIdsKey);
+  }
 }

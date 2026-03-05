@@ -85,7 +85,7 @@ class ChatSubAgent(BaseSubAgent):
         Returns:
             dict: 更新后的状态，包含 messages
         """
-        messages = []
+        messages = [HumanMessage(content=state['user_message'])]
 
         # 系统提示词
         system_prompt = build_system_prompt(

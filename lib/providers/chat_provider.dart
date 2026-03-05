@@ -394,6 +394,13 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     // 恢复待确认计划列表或已响应的计划列表（多计划支持）
     final pendingPlans = await _localService.loadPendingPlans();
+    // 恢复 messageId -> planDbId 映射（用于后端 API 调用）
+    final savedMessagePlanDbIds = await _localService.loadMessagePlanDbIds();
+    _messagePlanDbIds.addAll(savedMessagePlanDbIds);
+    if (_messagePlanDbIds.isNotEmpty) {
+      debugPrint('[ChatProvider] 恢复了 ${_messagePlanDbIds.length} 个 messageId -> planDbId 映射');
+    }
+
     if (pendingPlans.isNotEmpty) {
       // 有待确认计划，状态为未响应
       _pendingWorkoutPlans.addAll(pendingPlans);
@@ -923,6 +930,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
               // 记录 messageId 到 planId 的映射，用于后续确认/拒绝
               if (chunk.messageId != null && chunk.planId != null) {
                 _messagePlanDbIds[chunk.messageId!] = chunk.planId!;
+                // 持久化映射到本地存储，确保应用重启后仍能调用后端 API
+                _localService.saveMessagePlanDbIds(Map<String, String>.from(_messagePlanDbIds));
                 debugPrint('[ChatProvider] 记录 planId 映射: messageId=${chunk.messageId}, planId=${chunk.planId}');
               }
               // 通知UI更新显示计划预览
@@ -1292,6 +1301,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           } catch (e) {
             debugPrint('[ChatProvider] 更新后端计划状态失败: $e');
           }
+          // 删除已使用的映射（无论成功与否，都清理本地映射）
+          _messagePlanDbIds.remove(messageId);
+          await _localService.saveMessagePlanDbIds(Map<String, String>.from(_messagePlanDbIds));
         }
       }
 
@@ -1303,6 +1315,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         _isPlanResponded = true;
         _isPlanConfirmed = true;
         await _localService.clearPendingPlans();
+        // 清除所有映射（所有计划都已处理完毕）
+        _messagePlanDbIds.clear();
+        await _localService.clearMessagePlanDbIds();
         // 保存已响应的计划列表
         final statusMap = <String, bool>{};
         for (final p in _pendingWorkoutPlans) {
@@ -1351,6 +1366,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         } catch (e) {
           debugPrint('[ChatProvider] 更新后端计划状态失败: $e');
         }
+        // 删除已使用的映射（无论成功与否，都清理本地映射）
+        _messagePlanDbIds.remove(messageId);
+        await _localService.saveMessagePlanDbIds(Map<String, String>.from(_messagePlanDbIds));
       }
     }
 
@@ -1362,6 +1380,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _isPlanResponded = true;
       _isPlanConfirmed = false;
       await _localService.clearPendingPlans();
+      // 清除所有映射（所有计划都已处理完毕）
+      _messagePlanDbIds.clear();
+      await _localService.clearMessagePlanDbIds();
       // 保存已响应的计划列表
       final respondedPlans = _pendingWorkoutPlans.where(
         (p) => _pendingPlanResponded[p.id] == true,
@@ -1394,6 +1415,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _isPlanConfirmed = false;
 
     await _localService.clearPendingPlans();
+    // 清除所有映射（所有计划都已处理完毕）
+    _messagePlanDbIds.clear();
+    await _localService.clearMessagePlanDbIds();
     // 保存已响应的计划列表
     final statusMap = <String, bool>{};
     for (final plan in _pendingWorkoutPlans) {
@@ -1432,6 +1456,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // 向后兼容：清除旧格式
     await _localService.clearPendingPlan();
     await _localService.clearRespondedPlan();
+    // 清除 messageId -> planDbId 映射
+    _messagePlanDbIds.clear();
+    await _localService.clearMessagePlanDbIds();
 
     // 清除Agent状态
     _activeAgents.clear();
@@ -1524,6 +1551,13 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     // 恢复待确认计划列表或已响应的计划列表（多计划支持）
     final pendingPlans = await _localService.loadPendingPlans();
+
+    // 恢复 messageId -> planDbId 映射（用于后端 API 调用）
+    final savedMessagePlanDbIds = await _localService.loadMessagePlanDbIds();
+    _messagePlanDbIds.addAll(savedMessagePlanDbIds);
+    if (_messagePlanDbIds.isNotEmpty) {
+      debugPrint('[ChatProvider] 恢复了 ${_messagePlanDbIds.length} 个 messageId -> planDbId 映射');
+    }
     if (pendingPlans.isNotEmpty) {
       _pendingWorkoutPlans.addAll(pendingPlans);
       _isPlanResponded = false;

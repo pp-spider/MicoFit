@@ -38,85 +38,6 @@ class TaskExecutor:
         """
         self.agent_registry = agent_registry
 
-    async def execute(
-        self,
-        plan: ExecutionPlan,
-        context: SharedContextPool,
-        user_id: str,
-        session_id: str,
-        user_message: str,
-        user_profile: dict | None = None,
-        history: list[dict] | None = None,
-        context_summary: str | None = None,
-        recent_memories: list[str] | None = None
-    ) -> list[Task]:
-        """
-        执行计划
-
-        Args:
-            plan: 执行计划
-            context: 共享上下文
-            user_id: 用户ID
-            session_id: 会话ID
-            user_message: 用户消息
-            user_profile: 用户画像
-            history: 历史消息
-            context_summary: 会话摘要
-            recent_memories: 跨会话记忆
-
-        Returns:
-            list[Task]: 执行完成的任务列表
-        """
-        tasks = plan.get("tasks", [])
-        execution_order = plan.get("execution_order", [])
-
-        if not execution_order:
-            logger.warning("执行计划为空")
-            return tasks
-
-        # 维护任务映射
-        task_map = {task["id"]: task for task in tasks}
-
-        # 遍历执行顺序
-        for task_id in execution_order:
-            task = task_map.get(task_id)
-            if not task:
-                continue
-
-            # 检查依赖是否完成
-            deps = task.get("depends_on", [])
-            for dep_id in deps:
-                if dep_id in task_map:
-                    dep_task = task_map[dep_id]
-                    if dep_task.get("status") != TaskStatus.COMPLETED:
-                        # 等待依赖完成
-                        logger.info(f"任务 {task_id} 等待依赖 {dep_id}")
-
-                        # 从上下文获取依赖结果
-                        try:
-                            await context.wait_task_complete(dep_id, timeout=30.0)
-                        except TimeoutError:
-                            logger.warning(f"等待依赖 {dep_id} 超时")
-
-            # 执行任务
-            updated_task = await self._execute_task(
-                task=task,
-                context=context,
-                user_id=user_id,
-                session_id=session_id,
-                original_message=user_message,
-                user_profile=user_profile,
-                history=history,
-                context_summary=context_summary,
-                recent_memories=recent_memories
-            )
-
-            # 更新任务状态
-            task_map[task_id] = updated_task
-
-        # 返回所有任务
-        return list(task_map.values())
-
     async def execute_parallel(
         self,
         plan: ExecutionPlan,
@@ -157,27 +78,6 @@ class TaskExecutor:
         """
         tasks = plan.get("tasks", [])
         parallel_groups = plan.get("parallel_groups", [])
-
-        if not parallel_groups:
-            logger.warning("没有并行组信息，回退到串行执行")
-            completed_tasks = await self.execute(
-                plan=plan,
-                context=context,
-                user_id=user_id,
-                session_id=session_id,
-                user_message=user_message,
-                user_profile=user_profile,
-                history=history,
-                context_summary=context_summary,
-                recent_memories=recent_memories
-            )
-            # 串行执行后，yield 所有任务的 chunks
-            for task in completed_tasks:
-                output_data = task.get("output_data", {})
-                for chunk in output_data.get("chunks", []):
-                    yield chunk
-            return
-
         task_map = {task["id"]: task for task in tasks}
 
         # 按批次执行
@@ -267,7 +167,7 @@ class TaskExecutor:
 
             # 等待所有任务完成，同时转发队列中的输出
             remaining_tasks = set(batch_task_ids_set)
-            timeout_per_task = 60.0
+            timeout_per_task = 180.0
             total_timeout = len(tasks_in_batch) * timeout_per_task
             start_time = asyncio.get_event_loop().time()
 
@@ -312,51 +212,6 @@ class TaskExecutor:
             }
 
             logger.info(f"批次 {batch_idx} 执行完成")
-
-    async def _execute_single_task(
-        self,
-        task: Task,
-        context: SharedContextPool,
-        user_id: str,
-        session_id: str,
-        original_message: str,
-        user_profile: dict | None = None,
-        history: list[dict] | None = None,
-        context_summary: str | None = None,
-        recent_memories: list[str] | None = None
-    ) -> dict:
-        """
-        执行单个任务并收集所有输出
-
-        与 _execute_task 的区别：此方法收集所有流式输出后返回完整结果，
-        而不是实时 yield。适用于并行执行场景。
-
-        Returns:
-            dict: 包含 chunks 和 output_data 的结果字典
-        """
-        chunks = []
-
-        async for item in self._execute_task(
-            task=task,
-            context=context,
-            user_id=user_id,
-            session_id=session_id,
-            original_message=original_message,
-            user_profile=user_profile,
-            history=history,
-            context_summary=context_summary,
-            recent_memories=recent_memories
-        ):
-            # 过滤掉 Task 对象，只收集 dict chunks
-            if isinstance(item, dict) and not isinstance(item.get("output_data"), dict):
-                chunks.append(item)
-
-        return {
-            "task_id": task["id"],
-            "status": task["status"],
-            "chunks": chunks,
-            "output_data": task.get("output_data", {})
-        }
 
     async def _execute_task(
         self,
@@ -418,7 +273,6 @@ class TaskExecutor:
             input_data = task.get("input_data", {}).copy()
 
             # 根据任务类型准备状态
-            # **workout_agent中未加入usermessage，只根据提前设置好的用户画像和训练部位进行推荐决策，个人感觉有失准确性
             if task_type == "workout":
                 # 获取从意图提取的偏好
                 extracted_preferences = input_data.get("extracted_preferences", {})

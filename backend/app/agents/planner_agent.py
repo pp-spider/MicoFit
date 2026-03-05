@@ -33,10 +33,6 @@ class PlannerAgent:
 
     def __init__(self):
         """初始化 PlannerAgent"""
-        print("\n" + "="*60)
-        print("🚀 PlannerAgent 初始化成功")
-        print("="*60 + "\n")
-
         # 初始化 SubAgents
         self.chat_sub_agent = ChatSubAgent()
         self.workout_sub_agent = WorkoutSubAgent()
@@ -54,14 +50,6 @@ class PlannerAgent:
         self.task_planner = TaskPlanner(self.agent_registry)
         self.task_executor = TaskExecutor(self.agent_registry)
         self.result_aggregator = ResultAggregator()
-
-        print("✅ PlannerAgent 组件加载完成")
-        print(f"   - TaskAnalyzer: 任务分析")
-        print(f"   - TaskPlanner: 任务规划")
-        print(f"   - TaskExecutor: 任务执行")
-        print(f"   - ResultAggregator: 结果聚合")
-        print(f"   - SummarySubAgent: 结果总结")
-        print("="*60 + "\n")
 
     async def process(
         self,
@@ -100,25 +88,10 @@ class PlannerAgent:
         context = SharedContextPool()
 
         try:
-            # ========== 步骤1: 任务分析 ==========
-            logger.info(f"PlannerAgent 开始处理: {user_message[:50]}...")
-            print("\n" + "─"*50)
-            print("📊 PlannerAgent - 任务分析中...")
-            print("─"*50 + "\n")
-
             task_analysis = await self.task_analyzer.analyze(
                 user_message=user_message,
                 user_profile=user_profile
             )
-
-            # 输出分析结果
-            print("\n" + "─"*50)
-            print("📊 任务分析完成")
-            print(f"   识别意图: {task_analysis.get('raw_intents')}")
-            print(f"   复杂度: {task_analysis.get('complexity')}")
-            print(f"   需要规划: {task_analysis.get('requires_planning')}")
-            print(f"   子任务数: {len(task_analysis.get('sub_tasks', []))}")
-            print("─"*50 + "\n")
 
             yield {
                 "type": "analysis",
@@ -131,21 +104,7 @@ class PlannerAgent:
                 }
             }
 
-            # ========== 步骤2: 任务规划 ==========
-            print("─"*50)
-            print("📋 PlannerAgent - 任务规划中...")
-            print("─"*50 + "\n")
-
             execution_plan = self.task_planner.plan(task_analysis)
-
-            # 输出规划结果
-            print("\n" + "─"*50)
-            print("📋 任务规划完成")
-            print(f"   任务数: {len(execution_plan.get('tasks', []))}")
-            print(f"   执行顺序: {execution_plan.get('execution_order')}")
-            print(f"   并行组: {execution_plan.get('parallel_groups')}")
-            print(f"   需要协作: {execution_plan.get('requires_collaboration')}")
-            print("─"*50 + "\n")
 
             yield {
                 "type": "plan_info",
@@ -153,11 +112,6 @@ class PlannerAgent:
                 "parallel_groups": execution_plan.get("parallel_groups"),
                 "requires_collaboration": execution_plan.get("requires_collaboration")
             }
-
-            # ========== 步骤3: 任务执行 ==========
-            print("─"*50)
-            print("⚡ PlannerAgent - 任务执行中...")
-            print("─"*50 + "\n")
 
             # 收集流式输出
             all_chunks = []
@@ -179,11 +133,9 @@ class PlannerAgent:
                 has_parallel_groups
             )
 
+            # 并行执行模式
             if should_use_parallel:
-                # ========== 并行执行模式 ==========
-                logger.info(f"使用并行执行模式，共 {len(parallel_groups)} 个批次")
-                print(f"\n🚀 使用并行执行模式，{len(parallel_groups)} 个批次\n")
-
+                logger.info("使用并行执行模式")
                 async for result in self.task_executor.execute_parallel(
                     plan=execution_plan,
                     context=context,
@@ -198,11 +150,9 @@ class PlannerAgent:
                     result_type = result.get("type")
 
                     if result_type == "batch_start":
-                        print(f"\n📦 批次 {result.get('batch_index') + 1}/{result.get('total_batches')} 开始: {result.get('tasks')}")
                         yield result
 
                     elif result_type == "batch_complete":
-                        print(f"✅ 批次 {result.get('batch_index') + 1} 完成")
                         yield result
 
                     elif result_type == "task_error":
@@ -231,12 +181,9 @@ class PlannerAgent:
                         # 实时 yield 到前端（带 task_id 标记）
                         yield result
 
-                print(f"\n✅ 并行执行完成\n")
-
             else:
-                # ========== 串行执行模式（默认/向后兼容） ==========
+                # 串行执行模式
                 logger.info("使用串行执行模式")
-
                 # 遍历执行任务并实时流式 yield 到前端
                 for task_id in execution_plan.get("execution_order", []):
                     # 找到对应的任务
@@ -293,19 +240,8 @@ class PlannerAgent:
                             # 实时 yield 到前端
                             yield chunk
 
-            # ========== 步骤4: 结果聚合 ==========
-            print("─"*50)
-            print("🔄 PlannerAgent - 结果聚合中...")
-            print("─"*50 + "\n")
-
+            # ========== 结果聚合 ==========
             aggregated = self.result_aggregator.aggregate(execution_plan.get("tasks", []), context)
-
-            print("\n" + "─"*50)
-            print("✅ PlannerAgent 处理完成")
-            print(f"   结果类型: {aggregated.get('type')}")
-            print(f"   响应格式: {aggregated.get('response_format')}")
-            print(f"   包含计划: {aggregated.get('plan') is not None}")
-            print("─"*50 + "\n")
 
             # 收集所有计划（支持多计划场景）
             plans = aggregated.get("plans", [])
@@ -326,12 +262,7 @@ class PlannerAgent:
         except Exception as e:
             import traceback
             logger.error(f"PlannerAgent 处理失败: {e}")
-            print("\n" + "─"*50)
-            print(f"❌ PlannerAgent 错误: {str(e)}")
-            print("─"*50)
-            print("堆栈跟踪:")
             traceback.print_exc()
-            print("─"*50 + "\n")
 
             yield {
                 "type": "error",

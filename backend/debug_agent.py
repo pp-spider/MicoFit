@@ -135,23 +135,22 @@ def interactive_mode():
     """交互式测试模式"""
     # 使用全局测试数据
     global TEST_USER_PROFILE, TEST_HISTORY
-
-    try:
-        user_input = "定制2个训练计划，一个是训练腹肌，一个是训练肩膀"
-
-
+    while True:
         try:
-            asyncio.run(run_agent_test(user_input))
+            user_input = input("User:")
+
+            try:
+                asyncio.run(run_agent_test(user_input))
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+
+        except KeyboardInterrupt:
+            print("\n\n退出程序")
         except Exception as e:
             import traceback
+            print(f"\n错误: {e}")
             traceback.print_exc()
-
-    except KeyboardInterrupt:
-        print("\n\n退出程序")
-    except Exception as e:
-        import traceback
-        print(f"\n错误: {e}")
-        traceback.print_exc()
 
 
 def main():
@@ -177,5 +176,7 @@ if __name__ == "__main__":
     """
     定制一份训练腹肌计划，并解释每个动作训练的目标肌群
     定制2个训练计划，一个是训练腹肌，一个是训练肩膀
+    我今天小腿酸疼，有什么方式可以缓解小腿的酸痛吗
+    推荐几个广西的旅游城市
     """
     main()
