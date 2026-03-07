@@ -261,4 +261,33 @@ class ChatLocalService {
   Future<void> clearMessagePlanDbIds() async {
     await UserDataHelper.remove(_messagePlanDbIdsKey);
   }
+
+  // ========== planId -> planDbId 映射持久化（支持多计划场景）==========
+
+  static const String _planIdToDbIdKey = 'plan_id_to_db_id';
+
+  /// 保存 planId 到 planDbId 的映射
+  /// 用于多计划场景下准确定位后端记录
+  Future<void> savePlanIdToDbId(Map<String, String> planIdToDbId) async {
+    await UserDataHelper.setString(_planIdToDbIdKey, jsonEncode(planIdToDbId));
+  }
+
+  /// 加载 planId 到 planDbId 的映射
+  Future<Map<String, String>> loadPlanIdToDbId() async {
+    final json = await UserDataHelper.getString(_planIdToDbIdKey);
+    if (json == null) return {};
+
+    try {
+      final Map<String, dynamic> decoded = jsonDecode(json);
+      return decoded.map((key, value) => MapEntry(key, value as String));
+    } catch (e) {
+      debugPrint('加载 planId -> planDbId 映射失败: $e');
+      return {};
+    }
+  }
+
+  /// 清除 planId 到 planDbId 的映射
+  Future<void> clearPlanIdToDbId() async {
+    await UserDataHelper.remove(_planIdToDbIdKey);
+  }
 }

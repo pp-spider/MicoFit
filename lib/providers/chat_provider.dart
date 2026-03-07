@@ -167,7 +167,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   /// 存储后端生成的计划数据库ID (messageId -> dbPlanId)
   /// 使用 messageId 作为 key，与后端 chat_generated_plans 表的 message_id 字段对应
+  /// 注意：此映射一个 messageId 只能对应一个 planDbId，多计划场景下请使用 _planIdToDbId
   final Map<String, String> _messagePlanDbIds = {};
+
+  /// 前端计划ID到后端计划数据库ID的映射 (planId -> planDbId)
+  /// 用于多计划场景下准确定位后端记录，解决一个消息关联多个计划的问题
+  final Map<String, String> _planIdToDbId = {};
 
   /// 消息ID到计划ID列表的映射（实现消息与计划的一对多绑定）
   final Map<String, List<String>> _messagePlanIds = {};
@@ -401,6 +406,13 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('[ChatProvider] 恢复了 ${_messagePlanDbIds.length} 个 messageId -> planDbId 映射');
     }
 
+    // 恢复 planId -> planDbId 映射（用于多计划场景）
+    final savedPlanIdToDbId = await _localService.loadPlanIdToDbId();
+    _planIdToDbId.addAll(savedPlanIdToDbId);
+    if (_planIdToDbId.isNotEmpty) {
+      debugPrint('[ChatProvider] 恢复了 ${_planIdToDbId.length} 个 planId -> planDbId 映射');
+    }
+
     if (pendingPlans.isNotEmpty) {
       // 有待确认计划，状态为未响应
       _pendingWorkoutPlans.addAll(pendingPlans);
@@ -550,6 +562,157 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     debugPrint('[ChatProvider] 消息解析完成，当前共有 ${_pendingWorkoutPlans.length} 个待确认计划');
     if (_pendingWorkoutPlans.isNotEmpty) {
       debugPrint('[ChatProvider] 计划列表: ${_pendingWorkoutPlans.map((p) => '${p.id}(${p.title})').toList()}');
+    }
+  }
+
+  /// 从后端同步计划状态
+  /// 清除本地缓存后，需要从后端获取计划的 response_status 来恢复状态
+  Future<void> _syncPlanStatusesFromBackend(String sessionId) async {
+    debugPrint('[ChatProvider] 开始从后端同步计划状态, sessionId: $sessionId');
+
+    try {
+      // 从后端获取会话中所有生成的计划
+      final backendPlans = await _sessionApiService.getSessionGeneratedPlans(sessionId);
+      debugPrint('[ChatProvider] 后端返回 ${backendPlans.length} 个计划');
+
+      if (backendPlans.isEmpty) return;
+
+      // 用于收集已响应的计划
+      final respondedPlans = <WorkoutPlan>[];
+      final respondedStatuses = <String, bool>{};
+
+      // 按 message_id 分组后端计划，支持多计划场景
+      final backendPlansByMessage = <String?, List<Map<String, dynamic>>>{};
+      for (final planData in backendPlans) {
+        final messageId = planData['message_id'] as String?;
+        backendPlansByMessage.putIfAbsent(messageId, () => []).add(planData);
+      }
+
+      debugPrint('[ChatProvider] 按 message_id 分组后: ${backendPlansByMessage.map((k, v) => MapEntry(k, v.length))}');
+
+      // 处理每个消息关联的计划
+      for (final entry in backendPlansByMessage.entries) {
+        final messageId = entry.key;
+        final messageBackendPlans = entry.value;
+
+        // 获取该消息关联的前端计划列表
+        List<WorkoutPlan> frontendPlans = [];
+        if (messageId != null) {
+          frontendPlans = getPlansForMessage(messageId);
+        }
+
+        // 如果前端没有该消息的计划，尝试从消息中解析
+        if (frontendPlans.isEmpty && messageId != null) {
+          ChatMessage? msg;
+          try {
+            msg = _messages.firstWhere((m) => m.id == messageId);
+          } catch (e) {
+            msg = null;
+          }
+
+          if (msg?.structuredData != null) {
+            final data = msg!.structuredData!;
+            if (data.containsKey('plans') && data['plans'] is List) {
+              final plansList = data['plans'] as List<dynamic>;
+              for (final planJson in plansList) {
+                try {
+                  final plan = WorkoutPlan.fromJson(planJson as Map<String, dynamic>);
+                  if (!_pendingWorkoutPlans.any((p) => p.id == plan.id)) {
+                    _pendingWorkoutPlans.add(plan);
+                    frontendPlans.add(plan);
+                  } else {
+                    // 已存在，找到已有计划
+                    frontendPlans.add(_pendingWorkoutPlans.firstWhere((p) => p.id == plan.id));
+                  }
+                } catch (e) {
+                  debugPrint('[ChatProvider] 解析计划失败: $e');
+                }
+              }
+            } else if (data.containsKey('modules')) {
+              try {
+                final plan = WorkoutPlan.fromJson(data);
+                if (!_pendingWorkoutPlans.any((p) => p.id == plan.id)) {
+                  _pendingWorkoutPlans.add(plan);
+                  frontendPlans.add(plan);
+                } else {
+                  frontendPlans.add(_pendingWorkoutPlans.firstWhere((p) => p.id == plan.id));
+                }
+              } catch (e) {
+                debugPrint('[ChatProvider] 解析单计划失败: $e');
+              }
+            }
+
+            // 更新消息和计划的绑定关系
+            if (frontendPlans.isNotEmpty) {
+              _messagePlanIds[messageId] = frontendPlans.map((p) => p.id).toList();
+            }
+          }
+        }
+
+        debugPrint('[ChatProvider] 消息 $messageId: 前端计划数=${frontendPlans.length}, 后端计划数=${messageBackendPlans.length}');
+
+        // 按索引匹配前端和后端计划
+        // 假设后端返回的顺序和前端解析的顺序一致
+        for (var i = 0; i < messageBackendPlans.length && i < frontendPlans.length; i++) {
+          final planData = messageBackendPlans[i];
+          final frontendPlan = frontendPlans[i];
+
+          final responseStatus = planData['response_status'] as String? ?? 'pending';
+          final planDbId = planData['id'] as String?;
+
+          debugPrint('[ChatProvider] 处理计划索引 $i: planDbId=$planDbId, frontendPlanId=${frontendPlan.id}, status=$responseStatus');
+
+          // 保存 planId -> planDbId 映射（用于后续确认/拒绝）
+          if (planDbId != null) {
+            _planIdToDbId[frontendPlan.id] = planDbId;
+          }
+
+          // 保留向后兼容的映射（第一个计划）
+          if (i == 0 && messageId != null && planDbId != null) {
+            _messagePlanDbIds[messageId] = planDbId;
+          }
+
+          // 只处理已确认或已拒绝的计划
+          if (responseStatus == 'confirmed' || responseStatus == 'rejected') {
+            _pendingPlanResponded[frontendPlan.id] = true;
+            _pendingPlanConfirmed[frontendPlan.id] = responseStatus == 'confirmed';
+
+            respondedPlans.add(frontendPlan);
+            respondedStatuses[frontendPlan.id] = responseStatus == 'confirmed';
+
+            debugPrint('[ChatProvider] 同步计划状态: frontendPlanId=${frontendPlan.id}, status=$responseStatus');
+          }
+        }
+
+        // 如果后端计划数多于前端，记录警告
+        if (messageBackendPlans.length > frontendPlans.length) {
+          debugPrint('[ChatProvider] 警告: 消息 $messageId 后端计划数(${messageBackendPlans.length})多于前端计划数(${frontendPlans.length})');
+        }
+      }
+
+      // 保存到本地存储
+      if (respondedPlans.isNotEmpty) {
+        await _localService.saveMessagePlanDbIds(Map<String, String>.from(_messagePlanDbIds));
+        await _localService.savePlanIdToDbId(Map<String, String>.from(_planIdToDbId));
+        await _localService.saveRespondedPlans(respondedPlans, respondedStatuses);
+        debugPrint('[ChatProvider] 已保存 ${respondedPlans.length} 个计划的响应状态到本地');
+      } else if (_planIdToDbId.isNotEmpty) {
+        // 即使没有已响应的计划，也保存映射关系
+        await _localService.savePlanIdToDbId(Map<String, String>.from(_planIdToDbId));
+      }
+
+      // 更新整体状态标志（向后兼容）
+      if (_pendingPlanResponded.isNotEmpty) {
+        _isPlanResponded = true;
+        _isPlanConfirmed = _pendingPlanConfirmed.values.isNotEmpty
+            ? _pendingPlanConfirmed.values.first
+            : null;
+      }
+
+      debugPrint('[ChatProvider] 计划状态同步完成');
+    } catch (e) {
+      debugPrint('[ChatProvider] 同步计划状态失败: $e');
+      // 不抛出异常，让上层决定如何处理
     }
   }
 
@@ -927,12 +1090,18 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
               _isPlanConfirmed = null;
               // 保存计划列表到本地（不等待）
               _localService.savePendingPlans(_pendingWorkoutPlans);
-              // 记录 messageId 到 planId 的映射，用于后续确认/拒绝
+              // 记录 planId 到 planDbId 的映射（支持多计划场景）
+              if (chunk.planId != null) {
+                _planIdToDbId[plan.id] = chunk.planId!;
+                _localService.savePlanIdToDbId(Map<String, String>.from(_planIdToDbId));
+                debugPrint('[ChatProvider] 记录 planId -> planDbId 映射: ${plan.id} -> ${chunk.planId}');
+              }
+              // 保留原有逻辑（向后兼容）
               if (chunk.messageId != null && chunk.planId != null) {
                 _messagePlanDbIds[chunk.messageId!] = chunk.planId!;
                 // 持久化映射到本地存储，确保应用重启后仍能调用后端 API
                 _localService.saveMessagePlanDbIds(Map<String, String>.from(_messagePlanDbIds));
-                debugPrint('[ChatProvider] 记录 planId 映射: messageId=${chunk.messageId}, planId=${chunk.planId}');
+                debugPrint('[ChatProvider] 记录 messageId -> planDbId 映射: messageId=${chunk.messageId}, planDbId=${chunk.planId}');
               }
               // 通知UI更新显示计划预览
               notifyListeners();
@@ -1277,34 +1446,40 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _pendingPlanResponded[plan.id] = true;
       _pendingPlanConfirmed[plan.id] = true;
 
-      // 更新后端响应状态（使用 messageId 获取数据库ID）
+      // 更新后端响应状态（优先使用 planId -> planDbId 映射，支持多计划场景）
       String? workoutPlanId;
-      if (messageId != null) {
-        final planDbId = _messagePlanDbIds[messageId];
-        if (planDbId != null) {
-          try {
-            final result = await _sessionApiService.updateGeneratedPlanResponse(planDbId, 'confirmed');
-            workoutPlanId = result['applied_plan_id'] as String?;
-            debugPrint('[ChatProvider] 后端计划状态已更新为 confirmed, messageId: $messageId, workoutPlanId: $workoutPlanId');
+      // 尝试获取 planDbId：先查新映射，再查旧映射（向后兼容）
+      final planDbId = _planIdToDbId[plan.id] ?? (messageId != null ? _messagePlanDbIds[messageId] : null);
 
-            // 调用后端 API 将计划应用到用户（保存到 workout_plan 表）
-            if (workoutPlanId != null) {
-              try {
-                final workoutApiService = WorkoutApiService();
-                await workoutApiService.applyPlan(workoutPlanId);
-                debugPrint('[ChatProvider] 计划已成功应用到用户: $workoutPlanId');
-              } catch (e) {
-                debugPrint('[ChatProvider] 应用计划到后端失败: $e');
-                // 继续执行，不阻止本地流程
-              }
+      if (planDbId != null) {
+        try {
+          final result = await _sessionApiService.updateGeneratedPlanResponse(planDbId, 'confirmed');
+          workoutPlanId = result['applied_plan_id'] as String?;
+          debugPrint('[ChatProvider] 后端计划状态已更新为 confirmed, planId: ${plan.id}, planDbId: $planDbId, workoutPlanId: $workoutPlanId');
+
+          // 调用后端 API 将计划应用到用户（保存到 workout_plan 表）
+          if (workoutPlanId != null) {
+            try {
+              final workoutApiService = WorkoutApiService();
+              await workoutApiService.applyPlan(workoutPlanId);
+              debugPrint('[ChatProvider] 计划已成功应用到用户: $workoutPlanId');
+            } catch (e) {
+              debugPrint('[ChatProvider] 应用计划到后端失败: $e');
+              // 继续执行，不阻止本地流程
             }
-          } catch (e) {
-            debugPrint('[ChatProvider] 更新后端计划状态失败: $e');
           }
-          // 删除已使用的映射（无论成功与否，都清理本地映射）
+        } catch (e) {
+          debugPrint('[ChatProvider] 更新后端计划状态失败: $e');
+        }
+        // 删除已使用的映射（无论成功与否，都清理本地映射）
+        _planIdToDbId.remove(plan.id);
+        if (messageId != null) {
           _messagePlanDbIds.remove(messageId);
           await _localService.saveMessagePlanDbIds(Map<String, String>.from(_messagePlanDbIds));
         }
+        await _localService.savePlanIdToDbId(Map<String, String>.from(_planIdToDbId));
+      } else {
+        debugPrint('[ChatProvider] 未找到 planDbId，无法更新后端状态. planId: ${plan.id}, messageId: $messageId');
       }
 
       // 检查是否所有计划都已响应
@@ -1317,7 +1492,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         await _localService.clearPendingPlans();
         // 清除所有映射（所有计划都已处理完毕）
         _messagePlanDbIds.clear();
+        _planIdToDbId.clear();
         await _localService.clearMessagePlanDbIds();
+        await _localService.clearPlanIdToDbId();
         // 保存已响应的计划列表
         final statusMap = <String, bool>{};
         for (final p in _pendingWorkoutPlans) {
@@ -1356,20 +1533,26 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _pendingPlanResponded[planId] = true;
     _pendingPlanConfirmed[planId] = false;
 
-    // 更新后端响应状态（使用 messageId 获取数据库ID）
-    if (messageId != null) {
-      final planDbId = _messagePlanDbIds[messageId];
-      if (planDbId != null) {
-        try {
-          await _sessionApiService.updateGeneratedPlanResponse(planDbId, 'rejected');
-          debugPrint('[ChatProvider] 后端计划状态已更新为 rejected, messageId: $messageId');
-        } catch (e) {
-          debugPrint('[ChatProvider] 更新后端计划状态失败: $e');
-        }
-        // 删除已使用的映射（无论成功与否，都清理本地映射）
+    // 更新后端响应状态（优先使用 planId -> planDbId 映射，支持多计划场景）
+    // 尝试获取 planDbId：先查新映射，再查旧映射（向后兼容）
+    final planDbId = _planIdToDbId[planId] ?? (messageId != null ? _messagePlanDbIds[messageId] : null);
+
+    if (planDbId != null) {
+      try {
+        await _sessionApiService.updateGeneratedPlanResponse(planDbId, 'rejected');
+        debugPrint('[ChatProvider] 后端计划状态已更新为 rejected, planId: $planId, planDbId: $planDbId');
+      } catch (e) {
+        debugPrint('[ChatProvider] 更新后端计划状态失败: $e');
+      }
+      // 删除已使用的映射（无论成功与否，都清理本地映射）
+      _planIdToDbId.remove(planId);
+      if (messageId != null) {
         _messagePlanDbIds.remove(messageId);
         await _localService.saveMessagePlanDbIds(Map<String, String>.from(_messagePlanDbIds));
       }
+      await _localService.savePlanIdToDbId(Map<String, String>.from(_planIdToDbId));
+    } else {
+      debugPrint('[ChatProvider] 未找到 planDbId，无法更新后端状态. planId: $planId, messageId: $messageId');
     }
 
     // 检查是否所有计划都已响应
@@ -1382,7 +1565,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       await _localService.clearPendingPlans();
       // 清除所有映射（所有计划都已处理完毕）
       _messagePlanDbIds.clear();
+      _planIdToDbId.clear();
       await _localService.clearMessagePlanDbIds();
+      await _localService.clearPlanIdToDbId();
       // 保存已响应的计划列表
       final respondedPlans = _pendingWorkoutPlans.where(
         (p) => _pendingPlanResponded[p.id] == true,
@@ -1417,7 +1602,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     await _localService.clearPendingPlans();
     // 清除所有映射（所有计划都已处理完毕）
     _messagePlanDbIds.clear();
+    _planIdToDbId.clear();
     await _localService.clearMessagePlanDbIds();
+    await _localService.clearPlanIdToDbId();
     // 保存已响应的计划列表
     final statusMap = <String, bool>{};
     for (final plan in _pendingWorkoutPlans) {
@@ -1459,6 +1646,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // 清除 messageId -> planDbId 映射
     _messagePlanDbIds.clear();
     await _localService.clearMessagePlanDbIds();
+    // 清除 planId -> planDbId 映射
+    _planIdToDbId.clear();
+    await _localService.clearPlanIdToDbId();
 
     // 清除Agent状态
     _activeAgents.clear();
@@ -1548,6 +1738,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _pendingPlanConfirmed.clear();
     _messagePlanIds.clear();
     _messagePlanDbIds.clear();
+    _planIdToDbId.clear();
 
     // 恢复待确认计划列表或已响应的计划列表（多计划支持）
     final pendingPlans = await _localService.loadPendingPlans();
@@ -1557,6 +1748,13 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _messagePlanDbIds.addAll(savedMessagePlanDbIds);
     if (_messagePlanDbIds.isNotEmpty) {
       debugPrint('[ChatProvider] 恢复了 ${_messagePlanDbIds.length} 个 messageId -> planDbId 映射');
+    }
+
+    // 恢复 planId -> planDbId 映射（用于多计划场景）
+    final savedPlanIdToDbId = await _localService.loadPlanIdToDbId();
+    _planIdToDbId.addAll(savedPlanIdToDbId);
+    if (_planIdToDbId.isNotEmpty) {
+      debugPrint('[ChatProvider] 恢复了 ${_planIdToDbId.length} 个 planId -> planDbId 映射');
     }
     if (pendingPlans.isNotEmpty) {
       _pendingWorkoutPlans.addAll(pendingPlans);
@@ -1597,6 +1795,14 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       // 从历史消息中解析待确认的训练计划
       _parseWorkoutPlansFromMessages();
+
+      // 从后端同步计划状态（清除本地缓存后需要重新同步）
+      try {
+        await _syncPlanStatusesFromBackend(sessionId);
+      } catch (e) {
+        debugPrint('[ChatProvider] 同步计划状态失败: $e');
+        // 不影响主流程，继续显示
+      }
 
       // 如果没有消息，显示空状态（而不是欢迎消息）
       if (_messages.isEmpty) {
