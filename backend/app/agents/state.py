@@ -33,10 +33,16 @@ class WorkoutSubAgentState(TypedDict):
     """
     messages: Annotated[Sequence[BaseMessage], operator.add]
     user_id: str
+    session_id: str | None                     # 会话ID，用于关联历史
     user_profile: dict | None
 
     # 从用户消息中提取的额外偏好
     extracted_preferences: dict | None         # 如用户说"练腿"，提取 focus: "legs"
+
+    # 历史上下文（用于记住用户之前的偏好和调整需求）
+    history: list[dict] | None                 # 历史消息
+    context_summary: str | None                # 会话摘要
+    recent_memories: list[str] | None          # 跨会话记忆
 
     # 计划生成相关
     workout_plan: dict | None

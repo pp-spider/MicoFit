@@ -148,14 +148,21 @@ class ContextService:
         # 获取最近的消息
         messages = await self._get_recent_messages(session_id)
 
-        # 计算是否需要摘要
-        needs_summary = (
-            len(messages) > self.SUMMARY_THRESHOLD and
-            not session.context_summary
-        )
+        # 计算是否需要更新摘要
+        # 1. 首次超过10条且没有摘要时生成
+        # 2. 之后每20条消息更新一次摘要
+        summary = session.context_summary or ""
+        needs_summary = False
+
+        if len(messages) > self.SUMMARY_THRESHOLD:
+            if not session.context_summary:
+                # 首次生成摘要
+                needs_summary = True
+            elif session.message_count > 0 and session.message_count % 20 == 0:
+                # 每20条消息更新摘要
+                needs_summary = True
 
         # 如果需要，生成摘要
-        summary = session.context_summary or ""
         if needs_summary:
             summary = await self.summarizer.summarize_messages(messages)
             await self.update_session_summary(session_id, summary)
@@ -399,6 +406,8 @@ class ContextService:
         """
         获取用户近期记忆（跨会话）
 
+        增强版：提取用户偏好、训练模式、常见问题等信息
+
         Args:
             user_id: 用户ID
             days: 查询最近几天的会话
@@ -428,14 +437,34 @@ class ContextService:
             "plans_generated": 0,
             "preferences_mentioned": [],
             "sessions_count": len(sessions),
+            "common_requests": [],  # 常见请求模式
+            "adjustment_patterns": [],  # 调整偏好模式
         }
 
+        all_user_messages = []
+
         for session in sessions:
+            # 收集会话摘要
             if session.context_summary:
                 memory["recent_topics"].append(session.context_summary)
 
-            # 统计生成的计划数
+            # 获取会话中的消息
             messages_result = await self.db.execute(
+                select(ChatMessage)
+                .where(
+                    and_(
+                        ChatMessage.session_id == session.id,
+                        ChatMessage.role == "user"
+                    )
+                )
+                .order_by(desc(ChatMessage.created_at))
+                .limit(20)
+            )
+            user_messages = messages_result.scalars().all()
+            all_user_messages.extend([m.content for m in user_messages])
+
+            # 统计生成的计划数
+            plans_result = await self.db.execute(
                 select(ChatMessage)
                 .where(
                     and_(
@@ -444,10 +473,131 @@ class ContextService:
                     )
                 )
             )
-            plans = messages_result.scalars().all()
+            plans = plans_result.scalars().all()
             memory["plans_generated"] += len(plans)
 
+        # 提取用户偏好（从用户消息中）
+        preferences = self._extract_preferences_from_messages(all_user_messages)
+        memory["preferences_mentioned"] = preferences
+
+        # 提取常见请求模式
+        memory["common_requests"] = self._extract_common_requests(all_user_messages)
+
+        # 提取调整偏好
+        memory["adjustment_patterns"] = self._extract_adjustment_patterns(all_user_messages)
+
         return memory
+
+    def _extract_preferences_from_messages(self, messages: List[str]) -> List[str]:
+        """
+        从用户消息中提取偏好
+
+        Args:
+            messages: 用户消息列表
+
+        Returns:
+            List[str]: 提取的偏好列表
+        """
+        preferences = []
+        all_text = " ".join(messages).lower()
+
+        # 部位偏好关键词
+        body_parts = {
+            "腿": "偏好腿部训练",
+            "核心": "偏好核心训练",
+            "腹": "偏好腹部训练",
+            "腰": "偏好腰部训练",
+            "背": "偏好背部训练",
+            "手臂": "偏好手臂训练",
+            "胸": "偏好胸部训练",
+            "臀": "偏好臀部训练",
+        }
+
+        # 强度偏好
+        intensity_prefs = {
+            "太累": "偏好低强度训练",
+            "轻松": "偏好低强度训练",
+            "简单": "偏好低强度训练",
+            "有点累": "偏好中等强度训练",
+            "挑战": "偏好高强度训练",
+            "强度": "关注训练强度",
+        }
+
+        # 场景偏好
+        scene_prefs = {
+            "办公室": "常在办公室训练",
+            "家里": "常在家里训练",
+            "家": "常在家里训练",
+            "床上": "常在床上训练",
+            "户外": "常在户外训练",
+        }
+
+        # 时间偏好
+        time_prefs = {
+            "没时间": "时间紧张，需要短时训练",
+            "时间不够": "时间紧张，需要短时训练",
+            "快点": "偏好快速训练",
+            "10分钟": "偏好10分钟左右训练",
+            "5分钟": "偏好5分钟左右训练",
+        }
+
+        # 检查各类偏好
+        for keyword, pref in {**body_parts, **intensity_prefs, **scene_prefs, **time_prefs}.items():
+            if keyword in all_text and pref not in preferences:
+                preferences.append(pref)
+
+        return preferences[:5]  # 最多返回5个偏好
+
+    def _extract_common_requests(self, messages: List[str]) -> List[str]:
+        """
+        提取常见请求模式
+
+        Args:
+            messages: 用户消息列表
+
+        Returns:
+            List[str]: 常见请求模式
+        """
+        patterns = []
+        all_text = " ".join(messages)
+
+        # 检查常见模式
+        if any(kw in all_text for kw in ["换个", "换一个", "别的", "不喜欢"]):
+            patterns.append("经常要求更换计划")
+
+        if any(kw in all_text for kw in ["太难", "太简单", "强度"]):
+            patterns.append("关注训练强度调整")
+
+        if any(kw in all_text for kw in ["怎么练", "怎么做", "教"]):
+            patterns.append("经常询问动作要领")
+
+        return patterns
+
+    def _extract_adjustment_patterns(self, messages: List[str]) -> List[str]:
+        """
+        提取用户调整偏好模式
+
+        Args:
+            messages: 用户消息列表
+
+        Returns:
+            List[str]: 调整偏好模式
+        """
+        patterns = []
+
+        for msg in messages:
+            msg_lower = msg.lower()
+
+            # 识别调整请求
+            if any(kw in msg_lower for kw in ["膝盖", "腰痛", "受伤", "疼痛", "不舒服"]):
+                if "避免膝盖压力" not in patterns:
+                    patterns.append("关注伤病保护，避免特定部位压力")
+
+            if any(kw in msg_lower for kw in ["有氧", "力量", "拉伸"]):
+                if "偏好特定训练类型" not in patterns:
+                    patterns.append("偏好特定训练类型")
+
+        return patterns
 
     async def get_session_memory_detail(
         self,

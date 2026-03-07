@@ -85,21 +85,22 @@ class ChatSubAgent(BaseSubAgent):
         Returns:
             dict: 更新后的状态，包含 messages
         """
-        messages = [HumanMessage(content=state['user_message'])]
+        messages = []
 
-        # 系统提示词
+        # 1. 系统提示词（必须是第一条消息）
         system_prompt = build_system_prompt(
             user_profile=state.get("user_profile"),
             context_summary=state.get("context_summary"),
             recent_memories=state.get("recent_memories")
         )
-
         messages.append(SystemMessage(content=system_prompt))
 
-        # 历史消息
+        # 2. 历史消息（最多20条）
         history = state.get("history", [])
         if history:
-            for msg in history[-20:]:  # 最近20条
+            # 确保按时间顺序排列，取最近20条
+            recent_history = history[-20:] if len(history) > 20 else history
+            for msg in recent_history:
                 role = msg.get("role")
                 content = msg.get("content", "")
                 if role == "user":
@@ -107,7 +108,7 @@ class ChatSubAgent(BaseSubAgent):
                 elif role == "assistant":
                     messages.append(AIMessage(content=content))
 
-        # 当前消息
+        # 3. 当前用户消息
         messages.append(HumanMessage(content=state["user_message"]))
 
         return {

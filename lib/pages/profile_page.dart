@@ -54,7 +54,10 @@ class _ProfilePageState extends State<ProfilePage> {
       _weeklyDays = 3;
       _timeBudget = 12;
     }
-    _loadHistoryPlans();
+    // 延迟加载历史计划，避免在构建阶段调用 Provider 导致 setState() 异常
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadHistoryPlans();
+    });
     _loadAvatar();
   }
 
@@ -1432,7 +1435,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                     ),
                     title: Text(
-                      plan.title,
+                      plan.subtitle,
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,

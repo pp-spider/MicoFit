@@ -1281,11 +1281,11 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
             },
             borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildPlanHeader(plan),
+                  _buildPlanHeader(plan, isConfirmed: isConfirmed),
                   const SizedBox(height: 12),
                   _buildPlanStats(plan),
                   const SizedBox(height: 8),
@@ -1481,11 +1481,11 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
           },
           borderRadius: BorderRadius.circular(16),
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildPlanHeader(plan),
+                _buildPlanHeader(plan, isConfirmed: isConfirmed),
                 const SizedBox(height: 12),
                 _buildPlanStats(plan),
                 const SizedBox(height: 8),
@@ -1580,8 +1580,8 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                     if (success && mounted) {
                       // 刷新 WorkoutProvider 以更新今日计划和历史记录
                       final workoutProvider = context.read<WorkoutProvider>();
-                      workoutProvider.loadTodayWorkout();
-                      workoutProvider.loadHistoryPlans();
+                      await workoutProvider.loadTodayWorkout();
+                      await workoutProvider.loadHistoryPlans();
                     }
                   },
             style: ElevatedButton.styleFrom(
@@ -1645,7 +1645,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
   }
 
   /// 计划标题
-  Widget _buildPlanHeader(WorkoutPlan plan) {
+  Widget _buildPlanHeader(WorkoutPlan plan, {bool? isConfirmed}) {
     return Row(
       children: [
         Container(
@@ -1666,7 +1666,7 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            plan.title,
+            plan.subtitle,
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
@@ -1674,6 +1674,38 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
             ),
           ),
         ),
+        // 状态标签
+        if (isConfirmed != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: isConfirmed ? Colors.green[50] : Colors.orange[50],
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: isConfirmed ? Colors.green[300]! : Colors.orange[300]!,
+                width: 0.5,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isConfirmed ? Icons.check_circle : Icons.cancel,
+                  color: isConfirmed ? Colors.green : Colors.orange,
+                  size: 12,
+                ),
+                const SizedBox(width: 2),
+                Text(
+                  isConfirmed ? '已应用' : '已取消',
+                  style: TextStyle(
+                    color: isConfirmed ? Colors.green : Colors.orange,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -1964,8 +1996,8 @@ class _AiChatPageState extends State<AiChatPage> with TickerProviderStateMixin {
                     if (success && mounted) {
                       // 刷新 WorkoutProvider 以更新今日计划和历史记录
                       final workoutProvider = context.read<WorkoutProvider>();
-                      workoutProvider.loadTodayWorkout();
-                      workoutProvider.loadHistoryPlans();
+                      await workoutProvider.loadTodayWorkout();
+                      await workoutProvider.loadHistoryPlans();
                     }
                   },
             style: ElevatedButton.styleFrom(

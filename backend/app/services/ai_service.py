@@ -1,10 +1,11 @@
 """AI服务层 - 封装LangGraph Agent调用"""
+import asyncio
 import logging
 import uuid
 from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
-from datetime import date
+from datetime import date, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
@@ -92,10 +93,12 @@ class AIService:
             user_profile=profile_dict
         )
 
-        # 获取历史消息（增加到20条）
+        # 获取历史消息（按时间排序，保留最近30条，但只使用20条）
         history = await self.chat_service.get_session_messages(session_id, limit=30)
+        # 确保按时间顺序排列
+        history = sorted(history, key=lambda m: (m.created_at or datetime.min, m.id or ''))
         history_dicts = [
-            {"role": msg.role, "content": msg.content}
+            {"role": msg.role, "content": msg.content, "created_at": msg.created_at.isoformat() if msg.created_at else None}
             for msg in history
         ]
 
@@ -240,11 +243,20 @@ class AIService:
                     structured_data=structured_data,
                     data_type="workout_plan" if all_plans else "text"
                 )
-                # 更新会话摘要
-                await self.context_service.update_session_summary(
-                    session_id=session_id,
-                    summary=final_content
-                )
+                # 异步更新会话摘要（不阻塞响应）
+                # 使用对话历史生成真正的摘要，而不是直接保存回复内容
+                try:
+                    # 获取完整对话历史（包括当前这条）用于摘要生成
+                    all_messages = history_dicts + [
+                        {"role": "user", "content": message},
+                        {"role": "assistant", "content": final_content}
+                    ]
+                    # 异步生成并更新摘要，不等待结果
+                    asyncio.create_task(
+                        self._update_session_summary_async(session_id, all_messages)
+                    )
+                except Exception as e:
+                    logger.warning(f"触发摘要更新失败: {e}")
                 yield {
                     "type": "done",
                     "session_id": session_id,
@@ -655,3 +667,24 @@ class AIService:
             }
 
         return None
+
+    async def _update_session_summary_async(
+        self,
+        session_id: str,
+        messages: list[dict]
+    ):
+        """
+        异步更新会话摘要
+
+        Args:
+            session_id: 会话ID
+            messages: 消息列表，包含 role 和 content
+        """
+        try:
+            # 使用 ContextService 的 summarizer 生成摘要
+            summary = await self.context_service.summarizer.summarize_messages(messages)
+            if summary:
+                await self.context_service.update_session_summary(session_id, summary)
+                logger.info(f"会话 {session_id} 摘要已更新: {summary[:50]}...")
+        except Exception as e:
+            logger.error(f"生成会话摘要失败: {e}")

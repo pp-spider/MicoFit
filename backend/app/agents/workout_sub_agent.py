@@ -95,6 +95,7 @@ class WorkoutSubAgent(BaseSubAgent):
         构建提示词节点
 
         构建系统提示词和用户消息，用户消息会包含从意图提取的偏好
+        同时包含历史上下文，让AI记住用户之前的偏好和调整需求
 
         Args:
             state: 当前状态
@@ -104,12 +105,27 @@ class WorkoutSubAgent(BaseSubAgent):
         """
         user_profile = state.get("user_profile")
         preferences = state.get("extracted_preferences", {})
+        history = state.get("history", [])
+        context_summary = state.get("context_summary")
+        recent_memories = state.get("recent_memories", [])
 
-        # 构建系统提示词
-        system_prompt = build_workout_system_prompt(user_profile)
+        # 构建增强的系统提示词（包含历史上下文）
+        system_prompt = self._build_enhanced_system_prompt(
+            user_profile=user_profile,
+            context_summary=context_summary,
+            recent_memories=recent_memories
+        )
 
         # 构建用户消息（包含提取的偏好）
-        user_msg_parts = [state.get("messages")[-1]]
+        user_msg_parts = []
+
+        # 添加原始用户消息
+        messages_list = state.get("messages", [])
+        if messages_list:
+            if isinstance(messages_list[-1], str):
+                user_msg_parts.append(messages_list[-1])
+            else:
+                user_msg_parts.append(str(messages_list[-1]))
 
         if preferences:
             if preferences.get("focus_body_part"):
@@ -155,12 +171,25 @@ class WorkoutSubAgent(BaseSubAgent):
 
         user_message = "".join(user_msg_parts)
 
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message)
-        ]
+        # 构建消息列表
+        messages = [SystemMessage(content=system_prompt)]
 
-        logger.info(f"WorkoutSubAgent 构建提示词: {user_message}")
+        # 添加历史消息（最多10条，避免超出上下文限制）
+        if history:
+            recent_history = history[-10:] if len(history) > 10 else history
+            for msg in recent_history:
+                role = msg.get("role")
+                content = msg.get("content", "")
+                if role == "user":
+                    messages.append(HumanMessage(content=content))
+                elif role == "assistant":
+                    messages.append(AIMessage(content=content))
+
+        # 添加当前用户消息
+        messages.append(HumanMessage(content=user_message))
+
+        logger.info(f"WorkoutSubAgent 构建提示词: {user_message[:100]}...")
+        logger.info(f"包含历史消息: {len(history)} 条, 会话摘要: {bool(context_summary)}, 跨会话记忆: {len(recent_memories)} 条")
 
         return {
             **state,
@@ -168,6 +197,53 @@ class WorkoutSubAgent(BaseSubAgent):
             "stream_chunks": [],
             "validation_passed": False
         }
+
+    def _build_enhanced_system_prompt(
+        self,
+        user_profile: dict | None,
+        context_summary: str | None,
+        recent_memories: list[str] | None
+    ) -> str:
+        """
+        构建增强的系统提示词，包含历史上下文
+
+        Args:
+            user_profile: 用户画像
+            context_summary: 会话摘要
+            recent_memories: 跨会话记忆
+
+        Returns:
+            str: 增强的系统提示词
+        """
+        from app.agents.prompts import build_workout_system_prompt
+
+        # 基础提示词
+        base_prompt = build_workout_system_prompt(user_profile)
+
+        # 添加上下文信息
+        context_parts = [base_prompt]
+
+        # 添加会话摘要
+        if context_summary:
+            context_parts.append("\n**当前会话上下文**")
+            context_parts.append(f"此前对话摘要：{context_summary}")
+            context_parts.append("")
+
+        # 添加跨会话记忆
+        if recent_memories and len(recent_memories) > 0:
+            context_parts.append("**用户近期关注的主题**")
+            for memory in recent_memories:
+                context_parts.append(f"• {memory}")
+            context_parts.append("")
+
+        # 添加记忆使用指导
+        context_parts.append("**重要提示**")
+        context_parts.append("- 根据上述历史上下文，理解用户的偏好和之前的调整需求")
+        context_parts.append("- 如果用户要求调整计划，参考之前的对话避免重复问题")
+        context_parts.append("- 保持计划风格与用户之前接受的计划一致")
+        context_parts.append("")
+
+        return "\n".join(context_parts)
 
     async def _generate_node(self, state: WorkoutSubAgentState) -> dict:
         """
@@ -349,6 +425,8 @@ class WorkoutSubAgent(BaseSubAgent):
         user_profile = state.get("user_profile")
         preferences = state.get("extracted_preferences", {})
         retry_count = state.get("retry_count", 0)
+        context_summary = state.get("context_summary")
+        recent_memories = state.get("recent_memories", [])
 
         correction_prompt = f"""你是一个训练计划生成助手。刚才生成的训练计划验证失败，错误原因如下：
 
@@ -370,8 +448,15 @@ class WorkoutSubAgent(BaseSubAgent):
 
 直接输出修正后的用户消息（中文），不要输出其他内容。"""
 
+        # 构建增强的系统提示词（包含历史上下文）
+        system_prompt = self._build_enhanced_system_prompt(
+            user_profile=user_profile,
+            context_summary=context_summary,
+            recent_memories=recent_memories
+        )
+
         messages = [
-            SystemMessage(content="你是一个专业的健身教练助手，擅长生成有效的训练计划。"),
+            SystemMessage(content=system_prompt),
             HumanMessage(content=correction_prompt)
         ]
 
@@ -379,8 +464,7 @@ class WorkoutSubAgent(BaseSubAgent):
             response = await self.llm.ainvoke(messages)
             corrected_user_message = response.content
 
-            # 重新构建完整的 messages
-            system_prompt = build_workout_system_prompt(user_profile)
+            # 重新构建完整的 messages（使用同样的系统提示词）
             new_messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=corrected_user_message)

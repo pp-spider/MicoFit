@@ -142,7 +142,7 @@ class WorkoutService:
 
     async def get_today_plan(self, user_id: str) -> WorkoutPlan | None:
         """获取今日计划（优先返回已应用的 is_applied=true）"""
-        # 1. 先查询已应用的今日计划
+        # 1. 先查询已应用的今日计划，按创建时间倒序返回最新的
         result = await self.db.execute(
             select(WorkoutPlan)
             .where(
@@ -152,6 +152,8 @@ class WorkoutService:
                     WorkoutPlan.is_applied == True
                 )
             )
+            .order_by(desc(WorkoutPlan.created_at))
+            .limit(1)
         )
         plan = result.scalar_one_or_none()
         if plan:

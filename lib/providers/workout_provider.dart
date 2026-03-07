@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/workout.dart';
 import '../services/workout_local_service.dart';
@@ -150,7 +151,8 @@ class WorkoutProvider extends ChangeNotifier {
   Future<void> loadHistoryPlans({DateTime? startDate, DateTime? endDate, int limit = 20}) async {
     _isLoadingHistory = true;
     _historyErrorMessage = null;
-    notifyListeners();
+    // 使用 microtask 延迟通知，避免在 Widget 构建阶段触发 setState 异常
+    scheduleMicrotask(() => notifyListeners());
 
     try {
       final plans = await _apiService.getHistoryPlans(startDate: startDate, endDate: endDate, limit: limit);

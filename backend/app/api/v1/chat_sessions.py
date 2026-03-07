@@ -492,7 +492,7 @@ async def update_generated_plan_response(
                 detail="计划不存在或无权访问"
             )
 
-        # 创建 workout_plan 记录
+        # 创建 workout_plan 记录（强制创建新记录，支持同一天多个计划）
         workout_plan = await workout_service.create_plan(
             user_id=str(current_user.id),
             plan_date=date.today(),
@@ -504,6 +504,7 @@ async def update_generated_plan_response(
             modules=generated_plan.modules,
             ai_note=generated_plan.ai_note,
             is_applied=True,
+            force_create=True,
         )
         applied_plan_id = str(workout_plan.id)
 

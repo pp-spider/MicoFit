@@ -280,8 +280,12 @@ class TaskExecutor:
                 state = {
                     "messages": [intention_message],
                     "user_id": user_id,
+                    "session_id": session_id,
                     "user_profile": user_profile,
                     "extracted_preferences": extracted_preferences,
+                    "history": history,
+                    "context_summary": context_summary,
+                    "recent_memories": recent_memories,
                     "workout_plan": None,
                     "plan_json_str": None,
                     "validation_passed": False,
