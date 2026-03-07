@@ -168,9 +168,10 @@ class TaskPlanner:
         """
         mapping = {
             "workout": "workout_sub_agent",
-            "chat": "chat_sub_agent",
-            "explanation": "chat_sub_agent",  # 解释使用 ChatSubAgent
-            "feedback": "chat_sub_agent",     # 反馈使用 ChatSubAgent
+            "chat": "chat_sub_agent",                 # 健身主题对话
+            "general_chat": "general_chat_sub_agent", # 通用闲聊
+            "explanation": "chat_sub_agent",          # 解释使用 ChatSubAgent
+            "feedback": "chat_sub_agent",             # 反馈使用 ChatSubAgent
             "analysis": "chat_sub_agent"
         }
         return mapping.get(intent, "chat_sub_agent")
@@ -229,6 +230,7 @@ class TaskPlanner:
             "explanation": 2,
             "feedback": 2,
             "chat": 1,
+            "general_chat": 1,
             "analysis": 1
         }
         return priority_map.get(task.get("type", ""), 0)

@@ -377,8 +377,8 @@ class TaskExecutor:
                 # 任务完成后 yield Task 对象
                 yield task
 
-            elif task_type == "chat":
-                # 普通对话
+            elif task_type in ("chat", "general_chat"):
+                # 普通对话 (chat: 健身相关对话, general_chat: 通用闲聊)
                 state = {
                     "messages": [],
                     "user_id": user_id,

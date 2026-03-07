@@ -1,7 +1,7 @@
-"""ChatSubAgent - 处理普通对话
+"""GeneralChatSubAgent - 处理通用闲聊
 
-专注于普通对话、健身咨询、动作指导等。
-实现 BaseSubAgent 接口，供 RouterAgent 调用。
+专注于非健身主题的日常生活闲聊、情感交流。
+实现 BaseSubAgent 接口，供 PlannerAgent 调用。
 """
 import logging
 from typing import AsyncGenerator
@@ -12,24 +12,21 @@ from langgraph.graph import StateGraph, END
 
 from app.agents.base_sub_agent import BaseSubAgent
 from app.agents.state import ChatSubAgentState
-from app.agents.prompts import build_system_prompt
+from app.agents.prompts import build_general_chat_prompt
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-class ChatSubAgent(BaseSubAgent):
+class GeneralChatSubAgent(BaseSubAgent):
     """
-    ChatSubAgent - 处理健身相关对话
+    GeneralChatSubAgent - 处理通用闲聊
 
     职责：
-    - 健身知识问答
-    - 动作指导
-    - 健康咨询
-    - 训练反馈
-    - 健身计划解释
-
-    注意：非健身主题的闲聊（日常生活、情感交流等）请使用 GeneralChatSubAgent
+    - 日常生活话题闲聊（天气、电影、音乐等）
+    - 情感交流与倾听
+    - 轻松幽默的对话
+    - 当话题涉及健身时，友好地引导用户使用健身咨询功能
 
     Attributes:
         llm: 大语言模型
@@ -38,7 +35,7 @@ class ChatSubAgent(BaseSubAgent):
 
     def __init__(self):
         print("\n" + "─"*50)
-        print("💬 ChatSubAgent 初始化完成")
+        print("🌟 GeneralChatSubAgent 初始化完成")
         print("─"*50 + "\n")
 
         self.llm = ChatOpenAI(
@@ -51,7 +48,7 @@ class ChatSubAgent(BaseSubAgent):
         )
 
         self.workflow = self._build_workflow()
-        logger.info("ChatSubAgent 初始化完成")
+        logger.info("GeneralChatSubAgent 初始化完成")
 
     def _build_workflow(self) -> StateGraph:
         """
@@ -91,7 +88,7 @@ class ChatSubAgent(BaseSubAgent):
         messages = []
 
         # 1. 系统提示词（必须是第一条消息）
-        system_prompt = build_system_prompt(
+        system_prompt = build_general_chat_prompt(
             user_profile=state.get("user_profile"),
             context_summary=state.get("context_summary"),
             recent_memories=state.get("recent_memories")
@@ -150,12 +147,12 @@ class ChatSubAgent(BaseSubAgent):
     @property
     def name(self) -> str:
         """SubAgent 名称"""
-        return "chat_sub_agent"
+        return "general_chat_sub_agent"
 
     @property
     def description(self) -> str:
         """SubAgent 描述"""
-        return "处理普通对话、健身咨询、动作指导等"
+        return "处理日常生活闲聊、情感交流、非健身主题对话"
 
     async def stream(self, state: ChatSubAgentState) -> AsyncGenerator[dict, None]:
         """
@@ -171,7 +168,7 @@ class ChatSubAgent(BaseSubAgent):
             - {"type": "error", "message": "..."}
 
         Example:
-            async for chunk in chat_sub_agent.stream(state):
+            async for chunk in general_chat_sub_agent.stream(state):
                 if chunk["type"] == "chunk":
                     print(chunk["content"])
         """
@@ -182,7 +179,7 @@ class ChatSubAgent(BaseSubAgent):
         try:
             # 美化输出开始
             print("\n" + "─"*50)
-            print("💬 ChatSubAgent 正在处理对话...")
+            print("🌟 GeneralChatSubAgent 正在处理对话...")
             print("─"*50 + "\n")
 
             full_content = ""
@@ -203,12 +200,12 @@ class ChatSubAgent(BaseSubAgent):
 
             # 美化输出完成
             print("\n" + "─"*50)
-            print("✅ ChatSubAgent 对话完成")
+            print("✅ GeneralChatSubAgent 对话完成")
             print(f"   响应长度: {len(full_content)} 字符")
             print("─"*50 + "\n")
 
         except Exception as e:
-            logger.error(f"ChatSubAgent 生成失败: {e}")
+            logger.error(f"GeneralChatSubAgent 生成失败: {e}")
             yield {
                 "type": "error",
                 "message": f"生成响应时出错: {str(e)}"

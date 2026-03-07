@@ -19,6 +19,7 @@ class TaskType(str, Enum):
     """任务类型"""
     WORKOUT = "workout"
     CHAT = "chat"
+    GENERAL_CHAT = "general_chat"  # 通用闲聊（非健身主题）
     FEEDBACK = "feedback"
     EXPLANATION = "explanation"
     ANALYSIS = "analysis"

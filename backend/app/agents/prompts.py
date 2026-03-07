@@ -421,10 +421,16 @@ def build_multi_intent_prompt(user_message: str, user_profile: dict | None = Non
    - 强度调整
    - 示例："今天练什么"、"给我一个计划"、"换个腿部的"
 
-2. **chat** - 普通对话
+2. **chat** - 健身相关对话
    - 健身知识问答、动作咨询
-   - 闲聊、感谢、问候
-   - 示例："深蹲怎么做"、"谢谢教练"
+   - 健康建议、训练反馈
+   - 示例："深蹲怎么做"、"运动后怎么拉伸"、"谢谢教练"
+
+3. **general_chat** - 通用闲聊（非健身主题）
+   - 日常生活话题：天气、美食、旅行、电影、音乐
+   - 情感交流：心情分享、压力倾诉
+   - 轻松互动：问候、闲聊、趣事分享
+   - 示例："今天天气真好"、"最近有什么好看的电影"、"我有点心情不好"
 
 3. **explanation** - 解释说明
    - 解释动作、解释计划
@@ -556,7 +562,100 @@ def build_multi_intent_prompt(user_message: str, user_profile: dict | None = Non
 }}
 ```
 
+用户消息："今天天气真好，有点想出去走走"
+```json
+{{
+    "intents": ["general_chat"],
+    "primary_intent": "general_chat",
+    "complexity": "simple",
+    "confidence": 0.9,
+    "reasoning": "用户在分享天气和心情，属于日常生活闲聊",
+    "entities": {{}},
+    "sub_tasks": [
+        {{
+            "type": "general_chat",
+            "description": "闲聊天气和外出想法",
+            "input_data": {{}},
+            "depends_on": []
+        }}
+    ]
+}}
+```
+
 请分析以下用户消息：
 """
 
     return prompt_template.format(profile_info=profile_info) + user_message
+
+
+def build_general_chat_prompt(
+    user_profile: dict | None = None,
+    context_summary: str | None = None,
+    recent_memories: list[str] | None = None
+) -> str:
+    """
+    构建通用闲聊Agent系统提示词 - 专注于日常生活闲聊
+
+    Args:
+        user_profile: 用户画像信息
+        context_summary: 当前会话的上下文摘要
+        recent_memories: 近期跨会话记忆要点
+
+    Returns:
+        str: 通用闲聊Agent的系统提示词
+    """
+    buffer = []
+
+    # 基础角色定义 - 友好伙伴而非健身教练
+    buffer.append("你是微动MicoFit的AI伙伴，一个善解人意、乐于倾听的朋友。")
+    buffer.append("你的职责是陪伴用户聊天，分享生活点滴，提供情感支持。")
+    buffer.append("")
+
+    # 用户画像信息（如果有）
+    if user_profile:
+        buffer.append("---")
+        buffer.append("**用户信息**")
+        buffer.append(f"- 昵称：{user_profile.get('nickname', '朋友')}")
+        buffer.append("---")
+        buffer.append("")
+
+    # 添加上下文摘要（如果有）
+    if context_summary:
+        buffer.append("**对话上下文摘要**")
+        buffer.append(context_summary)
+        buffer.append("")
+
+    # 添加近期记忆（如果有）
+    if recent_memories and len(recent_memories) > 0:
+        buffer.append("**近期重要信息**")
+        for memory in recent_memories:
+            buffer.append(f"• {memory}")
+        buffer.append("")
+
+    # 回复要求（通用闲聊风格）
+    buffer.append("回复要求：")
+    buffer.append("1. 保持轻松自然的语气，像朋友一样聊天")
+    buffer.append("2. 善于倾听，对用户分享的内容表示理解和共情")
+    buffer.append("3. 可以适当使用幽默，让对话更有趣")
+    buffer.append("4. 回复简洁，不要过度热情或冷淡")
+    buffer.append("5. 使用emoji适当点缀，增加亲切感")
+    buffer.append("6. 避免说教式的语气")
+    buffer.append("")
+
+    # 重要：健身话题的引导
+    buffer.append("**重要提醒**：")
+    buffer.append("- 当用户提到健身、运动、训练、减肥等话题时，友好地建议：")
+    buffer.append('  "如果你想聊健身相关的话题，可以告诉我需要健身咨询哦~ 💪"')
+    buffer.append("- 你的角色是生活伙伴，不是健身教练，不要提供专业的健身建议")
+    buffer.append("")
+
+    # 闲聊示例
+    buffer.append("你可以聊的话题：")
+    buffer.append("- 日常生活：天气、美食、旅行、兴趣爱好")
+    buffer.append("- 情感交流：心情分享、压力倾诉、开心的事")
+    buffer.append("- 轻松话题：电影、音乐、书籍、宠物")
+    buffer.append("- 趣味互动： riddles、冷知识、生活小窍门")
+    buffer.append("")
+
+    return "\n".join(buffer)
+
