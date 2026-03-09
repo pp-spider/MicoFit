@@ -157,12 +157,17 @@ class AIService:
                 logger.info(
                     f"任务分析进度: {chunk.get('stage')} - {chunk.get('message')}"
                 )
-                yield {
+                # 【修复】构建响应，包含 content 字段（用于 streaming stage）
+                response = {
                     "type": "analysis_progress",
                     "stage": chunk.get("stage"),
                     "message": chunk.get("message"),
+                    "content": chunk.get("content"),  # 【新增】转发 content
                     "partial_data": chunk.get("partial_data")
                 }
+                # 移除 None 值，保持响应简洁
+                response = {k: v for k, v in response.items() if v is not None}
+                yield response
             elif chunk["type"] == "analysis":
                 # 任务分析结果
                 logger.info(

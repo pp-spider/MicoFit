@@ -2,7 +2,6 @@
 
 分析用户请求，识别任务类型、复杂度和子任务。
 """
-import asyncio
 import json
 import re
 import logging
@@ -192,11 +191,17 @@ class TaskAnalyzer:
             prompt = build_multi_intent_prompt(user_message, user_profile, history)
             messages = [SystemMessage(content=prompt)]
 
-            # 3. 调用 LLM 进行流式分析
+            # 3. 调用 LLM 进行流式分析 - 实时 yield 每个 chunk
             full_content = ""
             async for chunk in self.llm.astream(messages):
                 if chunk.content:
                     full_content += chunk.content
+                    # 【关键修复】实时 yield 每个 chunk，让前端立即显示
+                    yield {
+                        "type": "analysis_progress",
+                        "stage": "streaming",
+                        "content": chunk.content
+                    }
 
             # 4. 解析 JSON 响应
             result = self._parse_json_response(full_content)
@@ -241,18 +246,16 @@ class TaskAnalyzer:
                 if reasoning:
                     analysis_texts.append(f"分析依据：{reasoning}")
 
-                # 流式输出分析文本（逐个字符模拟流式效果）
+                # 输出结构化分析结果
                 full_text = "\n".join(analysis_texts)
                 if full_text:
-                    # 分段输出，每段作为一个 chunk
+                    # 分段输出，每段作为一个 chunk（移除人工延迟，实现真正的实时输出）
                     for text in analysis_texts:
                         yield {
                             "type": "analysis_progress",
                             "stage": "chunk",
                             "content": text + "\n"
                         }
-                        # 小延迟模拟流式效果
-                        await asyncio.sleep(0.05)
 
                 # 6. 构建完整的分析结果
                 requires_planning = self._check_requires_planning(result)

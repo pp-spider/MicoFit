@@ -2,7 +2,6 @@
 import json
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from sse_starlette.sse import EventSourceResponse
@@ -36,31 +35,20 @@ async def chat_stream(
     """
     service = AIService(db)
 
-    async def event_generator():
+    async def sse_generator():
+        """SSE 格式生成器 - 使用 EventSourceResponse 格式"""
         async for chunk in service.stream_chat(
             user_id=str(current_user.id),
             session_id=request.session_id,
             message=request.message
         ):
+            # EventSourceResponse 格式：直接返回 dict，包含 event 和 data
             yield {
                 "event": chunk.get("type", "chunk"),
                 "data": json.dumps(chunk, ensure_ascii=False, default=str)
             }
 
-    async def sse_generator():
-        """SSE 格式生成器"""
-        import asyncio
-        async for chunk in service.stream_chat(
-            user_id=str(current_user.id),
-            session_id=request.session_id,
-            message=request.message
-        ):
-            # 使用 SSE 格式
-            event_type = chunk.get("type", "chunk")
-            data = json.dumps(chunk, ensure_ascii=False, default=str)
-            yield f"event: {event_type}\ndata: {data}\n\n"
-
-    return StreamingResponse(
+    return EventSourceResponse(
         sse_generator(),
         media_type="text/event-stream",
         headers={
