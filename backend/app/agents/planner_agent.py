@@ -91,11 +91,32 @@ class PlannerAgent:
         context = SharedContextPool()
 
         try:
-            task_analysis = await self.task_analyzer.analyze(
+            print("在这里1")
+            # 使用流式分析替代同步分析，实时转发分析进度
+            task_analysis = None
+            async for progress in self.task_analyzer.analyze_stream(
                 user_message=user_message,
-                user_profile=user_profile
-            )
+                user_profile=user_profile,
+                history=history
+            ):
+                # 转发分析进度事件到前端
+                yield progress
 
+                # 收集最终的分析结果
+                if progress.get("stage") == "completed":
+                    task_analysis = progress.get("analysis")
+
+            # 如果没有获取到分析结果（异常情况），使用降级方案
+            if task_analysis is None:
+                print("在这里2")
+                logger.error("流式分析未返回结果，使用降级分析")
+                task_analysis = await self.task_analyzer.analyze(
+                    user_message=user_message,
+                    user_profile=user_profile,
+                    history=history
+                )
+
+            # 保持向后兼容：同时发送传统的 analysis 事件
             yield {
                 "type": "analysis",
                 "analysis": {

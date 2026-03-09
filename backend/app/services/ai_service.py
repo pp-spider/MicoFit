@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import uuid
+import json
 from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
@@ -87,11 +88,15 @@ class AIService:
                 "weekly_days": user_profile.weekly_days,
             }
 
+        print(f"用户画像profile_dict：{json.dumps(profile_dict, ensure_ascii=False, indent=4)}")
+
         # 获取会话上下文（包含摘要和近期消息）
         context = await self.context_service.get_context_for_chat(
             session_id=session_id,
             user_profile=profile_dict
         )
+
+        print(f"会话上下文：{json.dumps(context, ensure_ascii=False, indent=4)}")
 
         # 获取历史消息（按时间排序，保留最近30条，但只使用20条）
         history = await self.chat_service.get_session_messages(session_id, limit=30)
@@ -102,9 +107,13 @@ class AIService:
             for msg in history
         ]
 
+        print(f"会话历史消息：{json.dumps(history_dicts, ensure_ascii=False, indent=4)}")
+
         # 获取用户跨会话记忆
         user_memory = await self.context_service.get_user_memory(user_id, days=7)
         recent_memories = user_memory.get("recent_topics", [])[:3]  # 取最近3个主题
+
+        print(f"跨会话记忆：{json.dumps(user_memory, ensure_ascii=False, indent=4)}")
 
         # 保存用户消息
         await self.chat_service.add_message(
@@ -143,7 +152,18 @@ class AIService:
             recent_memories=recent_memories
         ):
             # PlannerAgent 新增的事件类型
-            if chunk["type"] == "analysis":
+            if chunk["type"] == "analysis_progress":
+                # 任务分析进度（流式）
+                logger.info(
+                    f"任务分析进度: {chunk.get('stage')} - {chunk.get('message')}"
+                )
+                yield {
+                    "type": "analysis_progress",
+                    "stage": chunk.get("stage"),
+                    "message": chunk.get("message"),
+                    "partial_data": chunk.get("partial_data")
+                }
+            elif chunk["type"] == "analysis":
                 # 任务分析结果
                 logger.info(
                     f"任务分析: {chunk.get('analysis', {}).get('intents')} "

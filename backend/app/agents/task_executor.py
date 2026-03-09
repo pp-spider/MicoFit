@@ -274,6 +274,7 @@ class TaskExecutor:
 
             # 根据任务类型准备状态
             if task_type == "workout":
+                print("进入workout")
                 # 获取从意图提取的偏好
                 extracted_preferences = input_data.get("extracted_preferences", {})
 
@@ -332,6 +333,7 @@ class TaskExecutor:
                 yield task
 
             elif task_type == "explanation":
+                print("进入explanation")
                 # 解释任务需要依赖计划
                 plan = context.get_workout_plan()
 
@@ -378,6 +380,7 @@ class TaskExecutor:
                 yield task
 
             elif task_type in ("chat", "general_chat"):
+                print("进入chat")
                 # 普通对话 (chat: 健身相关对话, general_chat: 通用闲聊)
                 state = {
                     "messages": [],

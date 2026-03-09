@@ -29,6 +29,9 @@ class AIStreamChunk {
   // 多计划支持字段
   final int? planIndex;     // 当前计划索引
   final int? totalPlans;    // 总计划数
+  // 流式分析进度字段
+  final String? analysisStage;      // 分析阶段: started, intent_detecting, complexity_assessing, entity_extracting, task_splitting, completed, error
+  final Map<String, dynamic>? partialData; // 部分分析数据
 
   AIStreamChunk({
     required this.type,
@@ -48,11 +51,15 @@ class AIStreamChunk {
     this.parallelGroups,
     this.planIndex,
     this.totalPlans,
+    this.analysisStage,    // 分析阶段
+    this.partialData,      // 部分分析数据
   });
 
   factory AIStreamChunk.fromJson(Map<String, dynamic> json) {
+    final type = AIStreamType.fromString(json['type'] as String);
+
     return AIStreamChunk(
-      type: AIStreamType.fromString(json['type'] as String),
+      type: type,
       content: json['content'] as String?,
       plan: json['plan'] != null
           ? WorkoutPlan.fromJson(json['plan'] as Map<String, dynamic>)
@@ -71,6 +78,8 @@ class AIStreamChunk {
       parallelGroups: json['parallel_groups'] as List<dynamic>?,
       planIndex: json['plan_index'] as int?,
       totalPlans: json['total_plans'] as int?,
+      analysisStage: json['stage'] as String?,  // 分析阶段
+      partialData: json['partial_data'] as Map<String, dynamic>?,  // 部分分析数据
     );
   }
 }
@@ -86,6 +95,7 @@ enum AIStreamType {
   agentStatus, // Agent 执行状态
   analysis, // 任务分析（PlannerAgent规划阶段）
   planInfo, // 任务规划信息（PlannerAgent规划阶段）
+  analysisProgress, // 任务分析进度（流式分析过程）
   unknown;
 
   factory AIStreamType.fromString(String type) {
@@ -108,6 +118,8 @@ enum AIStreamType {
         return AIStreamType.analysis;
       case 'plan_info':
         return AIStreamType.planInfo;
+      case 'analysis_progress':
+        return AIStreamType.analysisProgress;
       default:
         return AIStreamType.unknown;
     }

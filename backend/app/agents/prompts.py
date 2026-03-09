@@ -386,7 +386,11 @@ def build_intent_recognition_prompt(user_message: str, user_profile: dict | None
 # Planner Agent 多意图识别 Prompt
 # ============================================================================
 
-def build_multi_intent_prompt(user_message: str, user_profile: dict | None = None) -> str:
+def build_multi_intent_prompt(
+    user_message: str,
+    user_profile: dict | None = None,
+    history: list[dict] | None = None
+) -> str:
     """
     构建多意图识别提示词 - 用于 Planner Agent
 
@@ -395,6 +399,7 @@ def build_multi_intent_prompt(user_message: str, user_profile: dict | None = Non
     Args:
         user_message: 用户消息
         user_profile: 用户画像信息
+        history: 历史对话消息列表，格式为 [{"role": "user"/"assistant", "content": "..."}]
 
     Returns:
         str: 多意图识别提示词
@@ -412,6 +417,8 @@ def build_multi_intent_prompt(user_message: str, user_profile: dict | None = Non
     prompt_template = """你是微动MicoFit的任务分析助手。你的任务是分析用户消息，识别所有可能的意图。
 
 {profile_info}
+
+{history_info}
 
 ## 任务类型定义
 
@@ -585,7 +592,26 @@ def build_multi_intent_prompt(user_message: str, user_profile: dict | None = Non
 请分析以下用户消息：
 """
 
-    return prompt_template.format(profile_info=profile_info) + user_message
+    # 构建历史对话信息
+    history_info = ""
+    if history and len(history) > 0:
+        history_lines = ["**历史对话上下文：**"]
+        # 只取最近的几条消息，避免提示词过长
+        recent_history = history[-6:] if len(history) > 6 else history
+        for msg in recent_history:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "user":
+                history_lines.append(f"用户：{content}")
+            elif role == "assistant":
+                # 截断过长的助手回复
+                if len(content) > 100:
+                    content = content[:100] + "..."
+                history_lines.append(f"助手：{content}")
+        history_lines.append("")
+        history_info = "\n".join(history_lines)
+
+    return prompt_template.format(profile_info=profile_info, history_info=history_info) + user_message
 
 
 def build_general_chat_prompt(

@@ -98,6 +98,8 @@ class ChatSubAgent(BaseSubAgent):
         )
         messages.append(SystemMessage(content=system_prompt))
 
+        print(f"ChatAgent的系统提示词构建：{system_prompt}")
+
         # 2. 历史消息（最多20条）
         history = state.get("history", [])
         if history:
@@ -113,6 +115,8 @@ class ChatSubAgent(BaseSubAgent):
 
         # 3. 当前用户消息
         messages.append(HumanMessage(content=state["user_message"]))
+
+        print(f"ChatAgent的消息列表：{messages}")
 
         return {
             **state,

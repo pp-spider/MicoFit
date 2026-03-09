@@ -2,6 +2,7 @@
 
 分析用户请求，识别任务类型、复杂度和子任务。
 """
+import asyncio
 import json
 import re
 import logging
@@ -40,7 +41,8 @@ class TaskAnalyzer:
     async def analyze(
         self,
         user_message: str,
-        user_profile: dict | None = None
+        user_profile: dict | None = None,
+        history: list[dict] | None = None
     ) -> TaskAnalysis:
         """
         分析用户请求
@@ -48,12 +50,13 @@ class TaskAnalyzer:
         Args:
             user_message: 用户消息
             user_profile: 用户画像
+            history: 历史对话消息列表，格式为 [{"role": "user"/"assistant", "content": "..."}]
 
         Returns:
             TaskAnalysis: 任务分析结果
         """
         # 1. 调用 LLM 进行多意图识别
-        multi_intent_result = await self._multi_intent_recognition(user_message, user_profile)
+        multi_intent_result = await self._multi_intent_recognition(user_message, user_profile, history)
 
         # 2. 判断是否需要规划
         requires_planning = self._check_requires_planning(multi_intent_result)
@@ -71,7 +74,8 @@ class TaskAnalyzer:
     async def _multi_intent_recognition(
         self,
         message: str,
-        user_profile: dict | None = None
+        user_profile: dict | None = None,
+        history: list[dict] | None = None
     ) -> MultiIntentResult:
         """
         多意图识别 - 使用 LLM 识别所有意图
@@ -79,12 +83,13 @@ class TaskAnalyzer:
         Args:
             message: 用户消息
             user_profile: 用户画像
+            history: 历史对话消息列表
 
         Returns:
             MultiIntentResult: 多意图识别结果
         """
         # 构建提示词
-        prompt = build_multi_intent_prompt(message, user_profile)
+        prompt = build_multi_intent_prompt(message, user_profile, history)
 
         messages = [
             SystemMessage(content=prompt)
@@ -152,6 +157,173 @@ class TaskAnalyzer:
 
         # 多意图或复杂任务需要规划
         return len(intents) > 1 or complexity in ["medium", "complex"]
+
+    async def analyze_stream(
+        self,
+        user_message: str,
+        user_profile: dict | None = None,
+        history: list[dict] | None = None
+    ) -> AsyncGenerator[dict, None]:
+        """
+        流式任务分析 - 实时返回分析进度
+
+        采用流式文本输出方式，像其他 Agent 一样直接输出分析过程描述
+
+        Args:
+            user_message: 用户消息
+            user_profile: 用户画像
+            history: 历史对话消息列表，格式为 [{"role": "user"/"assistant", "content": "..."}]
+
+        Yields:
+            dict: 流式分析进度事件
+            - {"type": "analysis_progress", "stage": "started", "message": "..."}
+            - {"type": "analysis_progress", "stage": "chunk", "content": "..."}  # 流式文本
+            - {"type": "analysis_progress", "stage": "completed", "analysis": {...}}
+        """
+        # 1. 发送开始分析事件
+        yield {
+            "type": "analysis_progress",
+            "stage": "started",
+            "message": "开始分析任务..."
+        }
+
+        try:
+            # 2. 构建提示词
+            prompt = build_multi_intent_prompt(user_message, user_profile, history)
+            messages = [SystemMessage(content=prompt)]
+
+            # 3. 调用 LLM 进行流式分析
+            full_content = ""
+            async for chunk in self.llm.astream(messages):
+                if chunk.content:
+                    full_content += chunk.content
+
+            # 4. 解析 JSON 响应
+            result = self._parse_json_response(full_content)
+
+            if result:
+                # 5. 流式输出分析结果描述
+                intents = result.get("intents", [])
+                primary_intent = result.get("primary_intent", "chat")
+                complexity = result.get("complexity", "simple")
+                entities = result.get("entities", {})
+                sub_tasks = result.get("sub_tasks", [])
+                reasoning = result.get("reasoning", "")
+
+                # 构建分析描述文本并流式输出
+                analysis_texts = []
+
+                # 意图识别结果
+                if intents:
+                    analysis_texts.append(f"识别到用户意图：{', '.join(intents)}。")
+
+                # 复杂度评估
+                if complexity:
+                    complexity_desc = {
+                        "simple": "简单任务",
+                        "medium": "中等复杂度任务",
+                        "complex": "复杂多步骤任务"
+                    }.get(complexity, "任务")
+                    analysis_texts.append(f"评估为{complexity_desc}。")
+
+                # 实体信息
+                if entities:
+                    entity_desc = ", ".join([f"{k}={v}" for k, v in list(entities.items())[:3]])
+                    analysis_texts.append(f"提取关键信息：{entity_desc}。")
+
+                # 任务拆分
+                if sub_tasks:
+                    task_count = len(sub_tasks)
+                    task_types = [st.get("type", "未知") for st in sub_tasks]
+                    analysis_texts.append(f"将任务拆分为 {task_count} 个子任务：{', '.join(task_types)}。")
+
+                # 推理说明
+                if reasoning:
+                    analysis_texts.append(f"分析依据：{reasoning}")
+
+                # 流式输出分析文本（逐个字符模拟流式效果）
+                full_text = "\n".join(analysis_texts)
+                if full_text:
+                    # 分段输出，每段作为一个 chunk
+                    for text in analysis_texts:
+                        yield {
+                            "type": "analysis_progress",
+                            "stage": "chunk",
+                            "content": text + "\n"
+                        }
+                        # 小延迟模拟流式效果
+                        await asyncio.sleep(0.05)
+
+                # 6. 构建完整的分析结果
+                requires_planning = self._check_requires_planning(result)
+                task_analysis = TaskAnalysis(
+                    raw_intents=intents,
+                    primary_intent=primary_intent,
+                    requires_planning=requires_planning,
+                    complexity=complexity,
+                    extracted_entities=entities,
+                    sub_tasks=sub_tasks
+                )
+
+                # 7. 发送完成事件
+                yield {
+                    "type": "analysis_progress",
+                    "stage": "completed",
+                    "message": "分析完成",
+                    "analysis": task_analysis
+                }
+            else:
+                # JSON 解析失败，使用降级分析
+                yield {
+                    "type": "analysis_progress",
+                    "stage": "chunk",
+                    "content": "使用备用分析方案...\n"
+                }
+
+                fallback_result = self._fallback_analysis(user_message)
+                requires_planning = self._check_requires_planning(fallback_result)
+                task_analysis = TaskAnalysis(
+                    raw_intents=fallback_result.get("intents", []),
+                    primary_intent=fallback_result.get("primary_intent", "chat"),
+                    requires_planning=requires_planning,
+                    complexity=fallback_result.get("complexity", "simple"),
+                    extracted_entities=fallback_result.get("entities", {}),
+                    sub_tasks=fallback_result.get("sub_tasks", [])
+                )
+
+                yield {
+                    "type": "analysis_progress",
+                    "stage": "completed",
+                    "message": "分析完成",
+                    "analysis": task_analysis
+                }
+
+        except Exception as e:
+            logger.error(f"流式分析失败: {e}")
+            # 发生错误时返回降级分析结果
+            yield {
+                "type": "analysis_progress",
+                "stage": "error",
+                "message": f"分析出错: {str(e)}"
+            }
+
+            fallback_result = self._fallback_analysis(user_message)
+            requires_planning = self._check_requires_planning(fallback_result)
+            task_analysis = TaskAnalysis(
+                raw_intents=fallback_result.get("intents", []),
+                primary_intent=fallback_result.get("primary_intent", "chat"),
+                requires_planning=requires_planning,
+                complexity=fallback_result.get("complexity", "simple"),
+                extracted_entities=fallback_result.get("entities", {}),
+                sub_tasks=fallback_result.get("sub_tasks", [])
+            )
+
+            yield {
+                "type": "analysis_progress",
+                "stage": "completed",
+                "message": "✅ 分析完成（降级模式）",
+                "analysis": task_analysis
+            }
 
     def _fallback_analysis(self, message: str) -> MultiIntentResult:
         """

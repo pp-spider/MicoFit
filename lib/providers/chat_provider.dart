@@ -212,6 +212,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// Agent 内容累积映射（用于多Agent流式输出展示）
   final Map<String, StringBuffer> _agentContentBuffers = {};
 
+  /// Agent 完成时间记录（用于流式展示完成后保留一段时间）
+  final Map<String, DateTime> _agentCompletedAt = {};
+
   /// 是否有 summary_sub_agent 执行（用于区分单/多任务场景）
   bool _hasSummaryAgent = false;
 
@@ -254,14 +257,33 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     // 包含活跃的 PlannerAgent 和其他子Agent（排除 summary_agent）
+    debugPrint('[ChatProvider] agentOutputs - _activeAgents count: ${_activeAgents.length}');
+    for (final agent in _activeAgents) {
+      debugPrint('[ChatProvider] agentOutputs - agent: ${agent.agent}, isActive: ${agent.isActive}, taskId: ${agent.taskId}, contentItems: ${agent.contentItems.length}');
+    }
+    debugPrint('[ChatProvider] agentOutputs - _agentCompletedAt keys: ${_agentCompletedAt.keys.toList()}');
+
     final outputs = _activeAgents.where((agent) {
       // 排除 summary_agent
       if (agent.agent == 'summary_agent') return false;
       // 包含所有活跃的 Agent
-      if (agent.isActive) return true;
+      if (agent.isActive) {
+        debugPrint('[ChatProvider] agentOutputs - including ${agent.agent} (isActive=true)');
+        return true;
+      }
       // 包含已完成的非 planner_agent
       if (agent.agent != 'planner_agent') return true;
-      // planner_agent 只有在活跃时才显示
+      // planner_agent 完成后5秒内仍然显示（让用户看到完成状态）
+      final agentKey = agent.taskId ?? agent.agent;
+      final completedAt = _agentCompletedAt[agentKey];
+      debugPrint('[ChatProvider] agentOutputs - planner_agent agentKey=$agentKey, completedAt=$completedAt');
+      if (completedAt != null) {
+        final seconds = DateTime.now().difference(completedAt).inSeconds;
+        debugPrint('[ChatProvider] agentOutputs - planner_agent completed $seconds seconds ago');
+        return seconds < 5;
+      }
+      // planner_agent 非活跃且无完成记录，不显示
+      debugPrint('[ChatProvider] agentOutputs - excluding planner_agent (inactive and no completion time)');
       return false;
     }).map((agent) {
       // 使用 taskId 作为状态键，如果没有则使用 agent 名称
@@ -864,12 +886,18 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                 }
 
                 // 第一个子 Agent 开始执行时，标记 PlannerAgent 为完成
+                // 注意：只在 planner_agent 还未完成时标记，避免覆盖 analysisProgress 的完成状态
                 if (agent != 'planner_agent' && agent != 'summary_agent') {
                   final plannerIndex = _activeAgents.indexWhere((a) => a.agent == 'planner_agent');
                   if (plannerIndex != -1 && _activeAgents[plannerIndex].isActive) {
-                    _activeAgents[plannerIndex] = _activeAgents[plannerIndex]
-                        .copyWithCompleted()
-                        .addContentItem(AgentContentItem.success('规划完成'));
+                    final agentKey = _activeAgents[plannerIndex].taskId ?? 'planner_agent';
+                    // 只在还没有记录完成时间时才标记完成
+                    if (!_agentCompletedAt.containsKey(agentKey)) {
+                      _agentCompletedAt[agentKey] = DateTime.now();
+                      _activeAgents[plannerIndex] = _activeAgents[plannerIndex]
+                          .copyWithCompleted()
+                          .addContentItem(AgentContentItem.success('规划完成'));
+                    }
                   }
                 }
 
@@ -929,20 +957,17 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             break;
 
           case AIStreamType.analysis:
-            // PlannerAgent 任务分析阶段 - 显示规划中的提示
-            debugPrint('[ChatProvider] ====== 收到任务分析事件 ======');
-            debugPrint('[ChatProvider] chunk.type = ${chunk.type}');
-            debugPrint('[ChatProvider] chunk.analysis = ${chunk.analysis}');
+            // PlannerAgent 任务分析阶段 - 仅在 planner_agent 不存在时创建（向后兼容）
+            // 注意：流式分析进度由 analysisProgress 事件处理，这里避免重复更新
+            debugPrint('[ChatProvider] ====== 收到任务分析事件（向后兼容） ======');
             final plannerIndex = _activeAgents.indexWhere((a) => a.agent == 'planner_agent');
-            debugPrint('[ChatProvider] plannerIndex = $plannerIndex');
-            final analysis = chunk.analysis;
-            final complexity = analysis?['complexity'] as String?;
-            final requiresPlanning = analysis?['requires_planning'] as bool? ?? false;
-            debugPrint('[ChatProvider] complexity = $complexity, requiresPlanning = $requiresPlanning');
 
             if (plannerIndex == -1) {
-              // 理论上不会走到这里，因为发送消息时已创建 PlannerAgent
+              // 只有在 planner_agent 不存在时才创建（容错处理）
               debugPrint('[ChatProvider] 添加新的 PlannerAgent（容错）');
+              final analysis = chunk.analysis;
+              final complexity = analysis?['complexity'] as String?;
+              final requiresPlanning = analysis?['requires_planning'] as bool? ?? false;
               _activeAgents.add(
                 AgentExecutionStatus(
                   agent: 'planner_agent',
@@ -955,15 +980,104 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                   ],
                 ),
               );
+              notifyListeners();
             } else {
-              // 更新 PlannerAgent 内容
-              debugPrint('[ChatProvider] 更新已有的 PlannerAgent');
+              // planner_agent 已存在，跳过更新（由 analysisProgress 处理流式展示）
+              debugPrint('[ChatProvider] planner_agent 已存在，跳过 analysis 事件更新');
+            }
+            break;
+
+          case AIStreamType.analysisProgress:
+            // 流式分析进度事件 - 实时展示分析过程
+            final stage = chunk.analysisStage;
+            final message = chunk.message;
+            final partialData = chunk.partialData;
+
+            debugPrint('[ChatProvider] ====== 收到分析进度事件 ======');
+            debugPrint('[ChatProvider] stage = $stage, message = $message');
+
+            if (stage == null) break;
+
+            final plannerIndex = _activeAgents.indexWhere((a) => a.agent == 'planner_agent');
+            if (plannerIndex == -1) {
+              // 如果 PlannerAgent 不存在，创建一个新的
+              final initialContent = message != null ? [AgentContentItem.text(message)] : <AgentContentItem>[];
+              debugPrint('[ChatProvider] analysisProgress - 创建新的 planner_agent, stage=$stage, contentItems=${initialContent.map((i) => i.text).toList()}');
+              _activeAgents.add(
+                AgentExecutionStatus(
+                  agent: 'planner_agent',
+                  taskType: '任务分析中...',
+                  isActive: true,
+                  contentItems: initialContent,
+                ),
+              );
+            } else {
               final existing = _activeAgents[plannerIndex];
-              _activeAgents[plannerIndex] = existing.addContentItem(
-                AgentContentItem.text('分析完成，识别意图: ${analysis?['primary_intent'] ?? '未知'}'),
+              final List<AgentContentItem> newContentItems = [];
+
+              // 根据阶段添加不同的内容项
+              switch (stage) {
+                case 'started':
+                  // 开始分析，显示初始状态
+                  break;
+                case 'chunk':
+                  // 流式文本内容 - 直接追加到 contentItems
+                  final content = chunk.content;
+                  if (content != null && content.isNotEmpty) {
+                    newContentItems.add(AgentContentItem.text(content));
+                  }
+                  break;
+                case 'completed':
+                  // 分析完成，标记为完成状态
+                  newContentItems.add(AgentContentItem.success(message ?? '分析完成'));
+                  break;
+                case 'fallback':
+                  newContentItems.add(AgentContentItem.warning(message ?? '使用备用分析方案'));
+                  break;
+                case 'error':
+                  newContentItems.add(AgentContentItem.error(message ?? '分析出错'));
+                  break;
+                default:
+                  // 其他情况（兼容旧版），使用 message
+                  if (message != null) {
+                    newContentItems.add(AgentContentItem.text(message));
+                  }
+              }
+
+              // 更新任务类型以反映当前阶段
+              String taskType = '任务分析中...';
+              if (stage == 'completed') {
+                taskType = '分析完成';
+              } else if (stage == 'error') {
+                taskType = '分析出错';
+              }
+
+              // 构建新的内容项列表：保留现有项 + 添加新项（追加而非替换）
+              final updatedContentItems = [
+                ...existing.contentItems.where((item) => item.type != AgentContentType.typing),
+                ...newContentItems,
+              ];
+
+              debugPrint('[ChatProvider] analysisProgress - stage=$stage, existing items: ${existing.contentItems.length}, new items: ${newContentItems.length}, total: ${updatedContentItems.length}');
+              debugPrint('[ChatProvider] analysisProgress - updated contentItems: ${updatedContentItems.map((i) => '${i.type.name}:${i.text?.substring(0, i.text!.length > 20 ? 20 : i.text!.length)}...').toList()}');
+
+              // 检查是否是完成状态，如果是则记录完成时间
+              final isCompleted = stage == 'completed' || stage == 'error';
+              final agentKey = existing.taskId ?? existing.agent;
+              if (isCompleted) {
+                _agentCompletedAt[agentKey] = DateTime.now();
+                debugPrint('[ChatProvider] analysisProgress - 记录完成时间, agentKey=$agentKey');
+              }
+
+              // 更新 Agent 状态
+              _activeAgents[plannerIndex] = AgentExecutionStatus(
+                agent: existing.agent,
+                taskType: taskType,
+                isActive: !isCompleted,
+                contentItems: updatedContentItems,
+                taskId: existing.taskId,
               );
             }
-            debugPrint('[ChatProvider] 通知UI更新，_activeAgents.length = ${_activeAgents.length}');
             notifyListeners();
             break;
 
@@ -980,6 +1094,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
             if (plannerIndex != -1) {
               final existing = _activeAgents[plannerIndex];
+              debugPrint('[ChatProvider] planInfo - existing.contentItems count: ${existing.contentItems.length}');
+              debugPrint('[ChatProvider] planInfo - existing.contentItems: ${existing.contentItems.map((i) => '${i.type.name}:${i.text}').toList()}');
+
               final newContentItems = [
                 ...existing.contentItems.where((item) => item.type != AgentContentType.typing),
                 AgentContentItem.success('任务规划完成'),
@@ -998,11 +1115,14 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                 );
               }
 
+              debugPrint('[ChatProvider] planInfo - updated contentItems count: ${newContentItems.length}');
+
               _activeAgents[plannerIndex] = AgentExecutionStatus(
                 agent: existing.agent,
                 taskType: '任务规划完成，开始执行...',
                 isActive: true,
                 contentItems: newContentItems,
+                taskId: existing.taskId, // 保留 taskId 以确保 _agentCompletedAt 查找正确
               );
             }
             notifyListeners();
